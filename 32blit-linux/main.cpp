@@ -283,18 +283,24 @@ namespace blit_linux {
       is_storage_available,
 
       // profiler
-      nullptr, // enable_us_timer: the monotonic clock is always running
+      // enable_us_timer: the monotonic clock is always running
+      nullptr,
       get_us_timer,
       get_max_us_timer,
 
       // jpeg
-      nullptr, // decode_jpeg_buffer
-      nullptr, // decode_jpeg_file
+      // decode_jpeg_buffer
+      nullptr,
+      // decode_jpeg_file
+      nullptr,
 
       // launcher (the LVGL launcher is a separate program; see the proposal §4.1)
-      nullptr, // launch
-      nullptr, // erase_game
-      nullptr, // get_type_handler_metadata
+      // launch
+      nullptr,
+      // erase_game
+      nullptr,
+      // get_type_handler_metadata
+      nullptr,
 
       get_launch_path,
 
@@ -303,25 +309,36 @@ namespace blit_linux {
       set_multiplayer_enabled,
       send_message,
 
-      nullptr, // flash_to_tmp
-      nullptr, // tmp_file_closed
+      // flash_to_tmp
+      nullptr,
+      // tmp_file_closed
+      nullptr,
 
       get_metadata,
 
       set_screen_mode_format,
 
-      nullptr, // i2c_send
-      nullptr, // i2c_receive
+      // i2c_send
+      nullptr,
+      // i2c_receive
+      nullptr,
 
-      nullptr, // set_raw_cdc_enabled
-      nullptr, // cdc_write
-      nullptr, // cdc_read
+      // set_raw_cdc_enabled
+      nullptr,
+      // cdc_write
+      nullptr,
+      // cdc_read
+      nullptr,
 
-      nullptr, // list_installed_games
-      nullptr, // can_launch
+      // list_installed_games
+      nullptr,
+      // can_launch
+      nullptr,
 
-      nullptr, // get_screen_data: single buffer, the engine's screen pointer never changes
-      nullptr, // set_framebuffer
+      // get_screen_data: single buffer, the engine's screen pointer never changes
+      nullptr,
+      // set_framebuffer
+      nullptr,
     };
 
     /// Live state the engine reads (buttons, joystick, tilt...) and the game can set (LED, vibration).

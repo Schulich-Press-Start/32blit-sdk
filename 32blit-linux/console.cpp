@@ -115,7 +115,8 @@ namespace blit_linux {
     }
 
     if(termios_saved) {
-      tcflush(STDIN_FILENO, TCIFLUSH); // drop keys typed during play
+      // drop keys typed during play
+      tcflush(STDIN_FILENO, TCIFLUSH);
       tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
     }
   }

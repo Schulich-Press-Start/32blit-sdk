@@ -120,7 +120,8 @@ namespace blit_linux {
           });
           break;
 
-        default: // set_screen_mode_format() only accepts the three formats above
+        // set_screen_mode_format() only accepts the three formats above
+        default:
           return;
       }
     }

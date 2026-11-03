@@ -83,7 +83,8 @@ namespace {
           uint8_t bytes[2];
           memcpy(bytes, &v, 2);
           data.insert(data.end(), {bytes[0], bytes[1]});
-        } else { // P: one palette entry per pixel
+        } else {
+          // P: one palette entry per pixel
           palette[i] = c;
           data.push_back(uint8_t(i));
         }
@@ -220,8 +221,10 @@ namespace {
     TestFrame frame(PixelFormat::RGB, Size(3, 2), {red, red, red, red, red, red});
     TestPanel panel(format(), Size(10, 7));
 
-    present_frame(panel.buffer, panel.format, frame.info, {2, 5, 1}); // 6 wide from column 5 runs past column 9
-    present_frame(panel.buffer, panel.format, frame.info, {2, 2, 4}); // 4 tall from row 4 runs past row 6
+    // 6 wide from column 5 runs past column 9
+    present_frame(panel.buffer, panel.format, frame.info, {2, 5, 1});
+    // 4 tall from row 4 runs past row 6
+    present_frame(panel.buffer, panel.format, frame.info, {2, 2, 4});
     present_frame(panel.buffer, panel.format, frame.info, {1, -1, 0});
 
     EXPECT_TRUE(panel.untouched());

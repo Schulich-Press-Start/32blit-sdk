@@ -116,7 +116,8 @@ namespace blit_linux {
     else if(mode == blit::OpenMode::write)
       flags = O_WRONLY | O_CREAT | O_TRUNC;
     else if(mode == (blit::OpenMode::read | blit::OpenMode::write))
-      flags = O_RDWR; // like fopen "r+": the file must already exist
+      // like fopen "r+": the file must already exist
+      flags = O_RDWR;
     else
       return nullptr;
 
@@ -152,7 +153,8 @@ namespace blit_linux {
         return -1;
       }
 
-      if(got == 0) // end of file
+      // end of file
+      if(got == 0)
         break;
 
       total += uint32_t(got);
