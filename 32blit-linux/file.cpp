@@ -30,7 +30,8 @@ namespace blit_linux {
 
     /// What a `void *` file handle points to.
     struct FileHandle {
-      int fd; ///< Open file descriptor.
+      /// Open file descriptor.
+      int fd;
     };
 
     /**

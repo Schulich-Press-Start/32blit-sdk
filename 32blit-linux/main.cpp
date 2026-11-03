@@ -48,8 +48,10 @@ namespace blit_linux {
      *  Games may use any screen size from 96x96 up to the panel's size (screen_fit.hpp).
      */
     ///@{
-    constexpr blit::Size lores_size(160, 120); ///< `lores` size when the game doesn't ask for one
-    constexpr blit::Size hires_size(320, 240); ///< `hires` / `hires_palette` size when the game doesn't ask for one
+    /// `lores` size when the game doesn't ask for one
+    constexpr blit::Size lores_size(160, 120);
+    /// `hires` / `hires_palette` size when the game doesn't ask for one
+    constexpr blit::Size hires_size(320, 240);
 
     /// The game's screen. Sized in main() for the largest allowed screen: the whole panel at 3 bytes per pixel (RGB).
     std::vector<uint8_t> framebuffer;

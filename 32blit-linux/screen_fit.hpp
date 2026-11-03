@@ -26,9 +26,12 @@ namespace blit_linux {
 
   /** \brief Scale and position of a game screen on the panel. */
   struct ScreenFit {
-    int scale; ///< Panel pixels per game pixel, in each direction (1 or more).
-    int x;     ///< Panel column of the game screen's left edge.
-    int y;     ///< Panel row of the game screen's top edge.
+    /// Panel pixels per game pixel, in each direction (1 or more).
+    int scale;
+    /// Panel column of the game screen's left edge.
+    int x;
+    /// Panel row of the game screen's top edge.
+    int y;
   };
 
   /**

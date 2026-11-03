@@ -23,12 +23,16 @@
 namespace blit_linux {
 
   namespace {
-    int vt_fd = -1;               ///< Virtual terminal we switched to graphics mode, or -1.
-    bool vt_fd_owned = false;     ///< True if we opened vt_fd ourselves and must close it.
-    int saved_kd_mode = KD_TEXT;  ///< Mode to restore (normally KD_TEXT).
+    /// Virtual terminal we switched to graphics mode, or -1.
+    int vt_fd = -1;
+    /// True if we opened vt_fd ourselves and must close it.
+    bool vt_fd_owned = false;
+    /// Mode to restore (normally KD_TEXT).
+    int saved_kd_mode = KD_TEXT;
 
     bool termios_saved = false;
-    termios saved_termios;        ///< stdin settings before we turned echo off.
+    /// stdin settings before we turned echo off.
+    termios saved_termios;
 
     volatile sig_atomic_t quit_flag = 0;
     volatile sig_atomic_t restored = 0;

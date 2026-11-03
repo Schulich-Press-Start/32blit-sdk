@@ -30,10 +30,12 @@ namespace blit_linux {
     constexpr const char *device_path = "/dev/fb0";
 
     int fb_fd = -1;
-    uint8_t *fb_map = nullptr; ///< Start of the mapped device memory.
+    /// Start of the mapped device memory.
+    uint8_t *fb_map = nullptr;
     size_t fb_map_size = 0;
 
-    PanelBuffer panel;         ///< Visible screen inside fb_map; `pixels` is null until display_init() succeeds.
+    /// Visible screen inside fb_map; `pixels` is null until display_init() succeeds.
+    PanelBuffer panel;
     PanelFormat panel_format;
 
     /// Size of the last presented game screen; when it changes, the scale or position may too, so the borders are re-cleared.

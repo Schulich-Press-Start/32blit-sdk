@@ -33,8 +33,10 @@ namespace blit_linux {
   namespace {
     /** \brief One Linux key code and the 32blit button it presses. */
     struct KeyMapping {
-      uint16_t code;   ///< `KEY_*` / `BTN_*` from linux/input-event-codes.h.
-      uint32_t button; ///< `blit::Button` bit.
+      /// `KEY_*` / `BTN_*` from linux/input-event-codes.h.
+      uint16_t code;
+      /// `blit::Button` bit.
+      uint32_t button;
     };
 
     /**
@@ -89,8 +91,10 @@ namespace blit_linux {
 
     /** \brief An open input device. */
     struct Device {
-      int fd;           ///< Non-blocking file descriptor.
-      std::string path; ///< e.g. /dev/input/event3, for log messages.
+      /// Non-blocking file descriptor.
+      int fd;
+      /// e.g. /dev/input/event3, for log messages.
+      std::string path;
     };
 
     std::vector<Device> devices;

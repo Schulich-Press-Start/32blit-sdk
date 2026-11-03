@@ -99,7 +99,8 @@ namespace {
   /** \brief Panel memory with padding after every row, pre-filled with a marker so untouched bytes show up. */
   struct TestPanel {
     static constexpr uint8_t marker = 0xAA;
-    static constexpr uint32_t padding = 8; ///< Bytes after each row that must never be written.
+    /// Bytes after each row that must never be written.
+    static constexpr uint32_t padding = 8;
 
     PanelFormat format;
     std::vector<uint8_t> memory;

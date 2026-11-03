@@ -23,15 +23,19 @@ namespace blit_linux {
 
   /** \brief Where one colour channel lives inside a packed panel pixel. */
   struct PanelChannel {
-    uint8_t offset = 0; ///< Bit position of the channel's lowest bit.
-    uint8_t length = 8; ///< Bits in the channel, 1 to 8.
+    /// Bit position of the channel's lowest bit.
+    uint8_t offset = 0;
+    /// Bits in the channel, 1 to 8.
+    uint8_t length = 8;
   };
 
   /** \brief Pixel layout of a panel. */
   struct PanelFormat {
-    int bytes_per_pixel = 4; ///< 2 or 4.
+    /// 2 or 4.
+    int bytes_per_pixel = 4;
     PanelChannel red, green, blue;
-    uint32_t opaque_bits = 0; ///< Set in every pixel: all-ones alpha, for panels that read alpha.
+    /// Set in every pixel: all-ones alpha, for panels that read alpha.
+    uint32_t opaque_bits = 0;
 
     /** \brief Pack an 8-bit-per-channel colour into this layout, dropping each channel's low bits. */
     uint32_t pack(uint8_t r, uint8_t g, uint8_t b) const {
@@ -44,9 +48,12 @@ namespace blit_linux {
 
   /** \brief A panel's visible pixel memory. */
   struct PanelBuffer {
-    uint8_t *pixels = nullptr; ///< Top-left visible pixel.
-    blit::Size size;           ///< Visible width and height in pixels.
-    uint32_t line_length = 0;  ///< Bytes from one row to the next; can be more than width x bytes per pixel.
+    /// Top-left visible pixel.
+    uint8_t *pixels = nullptr;
+    /// Visible width and height in pixels.
+    blit::Size size;
+    /// Bytes from one row to the next; can be more than width x bytes per pixel.
+    uint32_t line_length = 0;
   };
 
   /** \brief Fill every visible pixel with black. Row padding is left alone. */
