@@ -7,12 +7,16 @@
  * The one exception is the save directory: `get_save_path()` returns an
  * absolute path, and any path that starts with it is used unchanged.
  *
- * Layout on disk:
+ * Layout on disk, by default:
  * \code
  * <game dir>/<game executable>
  * <game dir>/<asset files the game opens>
  * <game dir>/saves/<game title>/save0 ...
  * \endcode
+ *
+ * The program that starts the game can put saves anywhere else instead
+ * (`--save_dir`), e.g. one shared saves folder so saves survive
+ * reinstalling or replacing the game folder.
  */
 #pragma once
 
@@ -29,9 +33,13 @@ namespace blit_linux {
    *
    * Must be called before the game's `init()`.
    *
-   * \param title Game title from metadata, used as the save folder name.
+   * \param title    Game title from metadata, used as the save folder name
+   *                 when `save_dir` isn't given.
+   * \param save_dir Folder for this game's saves, or null/empty for
+   *                 `<game dir>/saves/<title>/`. A relative path is taken
+   *                 from the current directory. Missing folders are created.
    */
-  void file_init(const char *title);
+  void file_init(const char *title, const char *save_dir = nullptr);
 
   /**
    * \brief Open a file.

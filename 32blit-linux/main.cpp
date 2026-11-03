@@ -82,6 +82,9 @@ namespace blit_linux {
     /// `--launch_path` argument: a file the game was asked to open (as on the 32blit console).
     const char *launch_path = nullptr;
 
+    /// `--save_dir` argument: where this game's saves go, or nullptr for `<game dir>/saves/<title>/`.
+    const char *save_dir = nullptr;
+
     /// Port start time; now() and the µs timer count from here.
     timespec start_time;
 
@@ -403,6 +406,7 @@ namespace blit_linux {
     void print_usage(const char *argv0) {
       printf("Usage: %s <options>\n\n", argv0);
       printf(" --launch_path <file> -- File for the game to open (as the 32blit launcher would pass).\n");
+      printf(" --save_dir <dir>     -- Folder for this game's saves (default: <game dir>/saves/<title>/).\n");
       printf(" --info               -- Print metadata info and exit.\n");
       printf(" --help               -- Show this help.\n\n");
       printf("Controls: arrows/WASD = D-pad, Z X C V = A B X Y, 1 = HOME (hold to quit), 2/Esc = MENU\n");
@@ -432,6 +436,8 @@ int main(int argc, char *argv[]) {
 
     if(arg == "--launch_path" && i + 1 < argc) {
       launch_path = argv[++i];
+    } else if(arg == "--save_dir" && i + 1 < argc) {
+      save_dir = argv[++i];
     } else if(arg == "--info") {
       printf("%s %s\n\n%s\n\n", metadata_title, metadata_version, metadata_description);
       printf(" Category: %s\n Author:   %s\n URL:      %s\n", metadata_category, metadata_author, metadata_url);
@@ -451,7 +457,7 @@ int main(int argc, char *argv[]) {
 
   clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-  file_init(metadata_title);
+  file_init(metadata_title, save_dir);
 
   if(!display_init())
     return EXIT_FAILURE;

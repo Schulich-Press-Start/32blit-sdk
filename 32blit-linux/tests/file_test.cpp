@@ -2,14 +2,18 @@
  * \file file_test.cpp
  * \brief Unit tests for the POSIX file API in file.cpp.
  *
- * file_init() puts the save folder next to the running executable, so each
- * test gets its own folder under `<build dir>/32blit-linux/tests/saves/` and
- * deletes it afterwards. No hardware or special permissions needed.
+ * By default file_init() puts the save folder next to the running
+ * executable, so each test gets its own folder under
+ * `<build dir>/32blit-linux/tests/saves/` and deletes it afterwards. Tests
+ * of the save_dir option use a folder under the system temp folder instead.
+ * No hardware or special permissions needed.
  */
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <string>
+
+#include <unistd.h>
 
 #include "file.hpp"
 
@@ -39,6 +43,14 @@ namespace {
     }
   };
 
+  /** \brief A folder under the system temp folder that doesn't exist yet, removed when the test ends. */
+  struct TempFolder {
+    std::filesystem::path path = std::filesystem::temp_directory_path() / ("blit-linux-test-" + std::to_string(getpid()));
+
+    TempFolder() { std::filesystem::remove_all(path); }
+    ~TempFolder() { std::filesystem::remove_all(path); }
+  };
+
   TEST_F(FileTest, SlashesInTitleStayInsideSavesFolder) {
     file_init("sps/slash-test");
 
@@ -50,6 +62,41 @@ namespace {
     file_init("..");
 
     EXPECT_TRUE(ends_with(get_save_path(), "/saves/game/")) << get_save_path();
+  }
+
+  TEST_F(FileTest, SaveDirIsUsedInsteadOfTheGameFolder) {
+    TempFolder temp;
+    // two levels that don't exist yet: both must be created
+    const std::string dir = (temp.path / "shared" / "my-game").string();
+
+    file_init("ignored title", dir.c_str());
+
+    EXPECT_EQ(std::string(get_save_path()), dir + "/");
+    EXPECT_TRUE(std::filesystem::is_directory(dir));
+
+    void *out = open_file(save_file("save0"), blit::OpenMode::write);
+    ASSERT_NE(out, nullptr);
+    close_file(out);
+    EXPECT_TRUE(std::filesystem::is_regular_file(dir + "/save0"));
+  }
+
+  TEST_F(FileTest, RelativeSaveDirIsTakenFromTheCurrentDirectory) {
+    TempFolder temp;
+    std::filesystem::create_directories(temp.path);
+    const auto old_cwd = std::filesystem::current_path();
+
+    std::filesystem::current_path(temp.path);
+    file_init("ignored title", "saves/my-game");
+    std::filesystem::current_path(old_cwd);
+
+    EXPECT_EQ(std::string(get_save_path()), (std::filesystem::canonical(temp.path) / "saves/my-game/").string());
+    EXPECT_TRUE(std::filesystem::is_directory(temp.path / "saves" / "my-game"));
+  }
+
+  TEST_F(FileTest, EmptySaveDirKeepsTheDefault) {
+    file_init("sps-empty-save-dir", "");
+
+    EXPECT_TRUE(ends_with(get_save_path(), "/saves/sps-empty-save-dir/")) << get_save_path();
   }
 
   TEST_F(FileTest, WritesAtOffsetsAndReadsBack) {

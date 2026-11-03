@@ -98,11 +98,27 @@ namespace blit_linux {
       struct stat st;
       return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
     }
+
+    /** \brief `dir` as an absolute path ending in `/`; a relative `dir` is taken from the current directory. */
+    std::string absolute_directory(const char *dir) {
+      std::string path(dir);
+
+      if(path[0] != '/') {
+        char cwd[PATH_MAX];
+        if(getcwd(cwd, sizeof(cwd)))
+          path = std::string(cwd) + "/" + path;
+      }
+
+      if(path.back() != '/')
+        path += '/';
+
+      return path;
+    }
   }
 
-  void file_init(const char *title) {
+  void file_init(const char *title, const char *save_dir) {
     base_path = executable_directory();
-    save_path = base_path + "saves/" + folder_name(title) + "/";
+    save_path = (save_dir && save_dir[0]) ? absolute_directory(save_dir) : base_path + "saves/" + folder_name(title) + "/";
 
     if(!make_directories(save_path))
       fprintf(stderr, "32blit-linux: cannot create save directory %s: %s\n", save_path.c_str(), strerror(errno));
