@@ -40,13 +40,13 @@ namespace blit_linux {
     };
 
     /**
-     * \brief Key code → button table, shared by PC keyboards, gamepads and the handheld.
+     * \brief Key code → button table, shared by every input device.
      *
      * Keyboard keys match the SDL port (32blit-sdl/Input.cpp) so desktop
      * and Linux builds play the same. Gamepad codes follow the Linux
-     * gamepad convention (BTN_SOUTH = bottom face button, and so on); the
-     * handheld's devicetree `gpio-keys` should use these same codes so no
-     * board-specific table is needed.
+     * gamepad convention (BTN_SOUTH = bottom face button, and so on).
+     * Devicetree `gpio-keys` buttons should report these same codes, so no
+     * device-specific table is needed.
      */
     constexpr KeyMapping key_map[] = {
       // keyboard: arrows and WASD
@@ -75,7 +75,7 @@ namespace blit_linux {
       {KEY_3,   blit::Button::JOYSTICK},
       {KEY_ESC, blit::Button::MENU},
 
-      // gamepad / handheld buttons
+      // gamepad buttons
       {BTN_DPAD_UP,    blit::Button::DPAD_UP},
       {BTN_DPAD_DOWN,  blit::Button::DPAD_DOWN},
       {BTN_DPAD_LEFT,  blit::Button::DPAD_LEFT},

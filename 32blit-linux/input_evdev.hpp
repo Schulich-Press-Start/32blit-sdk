@@ -2,10 +2,10 @@
  * \file input_evdev.hpp
  * \brief Buttons from Linux input devices (evdev, `/dev/input/event*`).
  *
- * Every key-like device (USB/PC keyboards, gamepads, and the handheld's
- * buttons once they are described as `gpio-keys` in the devicetree) shows
- * up as an `event` device. We read key presses from all of them and turn
- * them into 32blit button bits using one table (see input_evdev.cpp).
+ * Every key-like device (keyboards, gamepads, and GPIO buttons described as
+ * `gpio-keys` in a devicetree) shows up as an `event` device. We read key
+ * presses from all of them and turn them into 32blit button bits using one
+ * table (see input_evdev.cpp).
  *
  * Reading evdev needs read access to `/dev/input/event*`: be in the
  * `input` group or run as root.

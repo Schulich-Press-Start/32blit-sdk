@@ -19,8 +19,9 @@
  *   sleep until the next update or frame
  * \endcode
  *
- * Holding HOME for one second exits the game (the handheld has no keyboard
- * for Ctrl+C). The exit code is what the launcher hand-off will use later.
+ * Holding HOME for one second exits the game, for setups with no keyboard
+ * to press Ctrl+C. The exit code tells the program that started the game
+ * whether it failed.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -235,9 +236,9 @@ namespace blit_linux {
 
     /**
      * \name Multiplayer
-     * There is no link hardware yet (proposal open question 5), so the link
-     * is never connected and messages go nowhere. The engine calls these
-     * without null checks, so they must exist.
+     * This port has no multiplayer link, so the link is never connected and
+     * messages go nowhere. The engine calls these without null checks, so
+     * they must exist.
      */
     ///@{
     bool is_multiplayer_connected() { return false; }
@@ -294,7 +295,7 @@ namespace blit_linux {
       // decode_jpeg_file
       nullptr,
 
-      // launcher (the LVGL launcher is a separate program; see the proposal §4.1)
+      // launcher: not supported; games are started by a separate program
       // launch
       nullptr,
       // erase_game

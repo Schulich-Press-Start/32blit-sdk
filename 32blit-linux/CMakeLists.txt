@@ -1,4 +1,4 @@
-# 32blit-linux: port of the 32blit SDK to embedded Linux (Allwinner T113 handheld).
+# 32blit-linux: port of the 32blit SDK to Linux without a window system or SDL.
 #
 # Selected by configuring with -D32BLIT_LINUX=ON (see 32blit-config.cmake).
 # Builds the port into the BlitHalLinux static library and defines the two
