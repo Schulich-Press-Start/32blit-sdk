@@ -72,7 +72,8 @@ namespace blit_linux {
 
   /**
    * \brief Call `callback` once per entry in a directory (skips `.` and `..`).
-   * \param path Directory relative to the game directory.
+   * \param path     Directory relative to the game directory.
+   * \param callback Called with each entry's name, flags (file or directory) and size.
    */
   void list_files(const std::string &path, std::function<void(blit::FileInfo &)> callback);
 
