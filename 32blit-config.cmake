@@ -136,6 +136,13 @@ if (NOT DEFINED BLIT_ONCE)
 
 		include(${CMAKE_CURRENT_LIST_DIR}/32blit-stm32/executable.cmake)
 	elseif(32BLIT_LINUX)
+		# Unit tests for the port (PC builds only). Enabled here, in the top-level
+		# directory, because ctest only finds tests when the top level enables testing.
+		option(BLIT_LINUX_TESTS "Build the 32blit-linux unit tests" OFF)
+		if(BLIT_LINUX_TESTS)
+			enable_testing()
+		endif()
+
 		add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/32blit-linux 32blit-linux)
 	elseif(PICO_SDK_PATH)
 		include(${CMAKE_CURRENT_LIST_DIR}/32blit-pico/executable.cmake)

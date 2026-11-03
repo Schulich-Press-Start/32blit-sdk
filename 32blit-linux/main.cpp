@@ -28,6 +28,7 @@
 #include <ctime>
 #include <random>
 #include <string>
+#include <vector>
 
 #include "engine/api_private.hpp"
 #include "engine/engine.hpp"
@@ -36,6 +37,7 @@
 #include "display_fb.hpp"
 #include "file.hpp"
 #include "input_evdev.hpp"
+#include "screen_fit.hpp"
 #include "user_code.hpp"
 
 namespace blit_linux {
@@ -43,20 +45,20 @@ namespace blit_linux {
   namespace {
     /** \name Screen
      *  The game draws into `framebuffer`; display_present() converts and copies it to the panel.
+     *  Games may use any screen size from 96x96 up to the panel's size (screen_fit.hpp).
      */
     ///@{
-    constexpr int max_width = 320;  ///< hires width; lores is half
-    constexpr int max_height = 240; ///< hires height; lores is half
+    constexpr blit::Size lores_size(160, 120); ///< `lores` size when the game doesn't ask for one
+    constexpr blit::Size hires_size(320, 240); ///< `hires` / `hires_palette` size when the game doesn't ask for one
 
-    /// Big enough for the largest mode: 320x240 at 3 bytes per pixel (RGB).
-    uint8_t framebuffer[max_width * max_height * 3];
+    /// The game's screen. Sized in main() for the largest allowed screen: the whole panel at 3 bytes per pixel (RGB).
+    std::vector<uint8_t> framebuffer;
 
     /// Colours for `PixelFormat::P` (palette) modes, set by the game.
     blit::Pen palette[256];
 
-    blit::ScreenMode cur_mode = blit::ScreenMode::lores;
     blit::PixelFormat cur_format = blit::PixelFormat::RGB;
-    blit::Size cur_bounds(max_width / 2, max_height / 2);
+    blit::Size cur_bounds = lores_size;
 
     /// Returned by set_screen_mode(); must outlive the call.
     blit::SurfaceInfo cur_surf_info;
@@ -118,27 +120,26 @@ namespace blit_linux {
      * Called by `blit::set_screen_mode()`. Fills in `data`, `bounds`,
      * `format` and `palette` of `new_surf_template`.
      *
-     * \param new_mode          lores (160x120), hires (320x240) or hires_palette.
+     * \param new_mode          lores, hires or hires_palette. Only picks the size
+     *                          when the game doesn't ask for one (160x120 or 320x240).
      * \param new_surf_template Requested format/bounds in; final surface out.
      *                          `format == -1` means "port default" (RGB).
      *                          Empty bounds mean "the mode's normal size".
-     * \return false for formats or sizes this port doesn't support.
+     *                          Any size from 96x96 up to the panel is accepted.
+     * \return false for formats this port doesn't support and for sizes
+     *         smaller than 96x96 or larger than the panel. The current
+     *         screen mode stays as it was.
      */
     bool set_screen_mode_format(blit::ScreenMode new_mode, blit::SurfaceTemplate &new_surf_template) {
-      new_surf_template.data = framebuffer;
+      new_surf_template.data = framebuffer.data();
 
       if(new_surf_template.format == (blit::PixelFormat)-1)
         new_surf_template.format = blit::PixelFormat::RGB;
 
-      blit::Size mode_bounds = new_mode == blit::ScreenMode::lores
-        ? blit::Size(max_width / 2, max_height / 2)
-        : blit::Size(max_width, max_height);
-
       if(new_surf_template.bounds.empty())
-        new_surf_template.bounds = mode_bounds;
+        new_surf_template.bounds = new_mode == blit::ScreenMode::lores ? lores_size : hires_size;
 
-      // 1.1 supports the standard sizes only; 480x272 comes in Stage 1.2
-      if(new_surf_template.bounds != mode_bounds)
+      if(!screen_size_allowed(display_size(), new_surf_template.bounds))
         return false;
 
       switch(new_surf_template.format) {
@@ -154,24 +155,24 @@ namespace blit_linux {
       }
 
       // takes effect from the next present, i.e. for the frame the game is drawing now
-      cur_mode = new_mode;
       cur_format = new_surf_template.format;
       cur_bounds = new_surf_template.bounds;
       return true;
     }
 
     /**
-     * \brief Older API entry: set a mode with its default format.
-     * \return Description of the new screen surface.
+     * \brief Older API entry: set a mode at its normal size with its default format.
+     * \return Description of the screen surface: the new one, or the
+     *         unchanged current one if the panel is too small for the mode.
      */
     blit::SurfaceInfo &set_screen_mode(blit::ScreenMode new_mode) {
       blit::SurfaceTemplate temp{nullptr, {0, 0},
         new_mode == blit::ScreenMode::hires_palette ? blit::PixelFormat::P : blit::PixelFormat::RGB};
 
-      // can't fail for the default formats
-      set_screen_mode_format(new_mode, temp);
+      // only fails on panels smaller than the mode's normal size
+      if(set_screen_mode_format(new_mode, temp))
+        cur_surf_info = blit::SurfaceInfo(temp);
 
-      cur_surf_info = blit::SurfaceInfo(temp);
       return cur_surf_info;
     }
 
@@ -358,11 +359,11 @@ namespace blit_linux {
           blit::render(now());
 
           blit::SurfaceInfo frame;
-          frame.data = framebuffer;
+          frame.data = framebuffer.data();
           frame.bounds = cur_bounds;
           frame.format = cur_format;
           frame.palette = palette;
-          display_present(frame, cur_mode == blit::ScreenMode::lores ? 2 : 1);
+          display_present(frame);
 
           next_frame_us += frame_interval_us;
 
@@ -434,6 +435,10 @@ int main(int argc, char *argv[]) {
 
   if(!display_init())
     return EXIT_FAILURE;
+
+  // big enough for the largest screen a game may ask for: the whole panel, 3 bytes per pixel
+  const blit::Size panel = display_size();
+  framebuffer.resize(size_t(panel.w) * size_t(panel.h) * 3);
 
   input_init();
   console_init();

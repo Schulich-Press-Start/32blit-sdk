@@ -13,6 +13,7 @@ add_library(BlitHalLinux STATIC
 	file.cpp
 	input_evdev.cpp
 	main.cpp
+	panel.cpp
 )
 
 target_link_libraries(BlitHalLinux PUBLIC BlitEngine)
@@ -71,3 +72,8 @@ const char *metadata_category = \"\${METADATA_CATEGORY}\";"
 
 	target_sources(${TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_metadata.cpp)
 endfunction()
+
+# Unit tests, see tests/CMakeLists.txt (option BLIT_LINUX_TESTS is in 32blit-config.cmake).
+if(BLIT_LINUX_TESTS)
+	add_subdirectory(tests)
+endif()

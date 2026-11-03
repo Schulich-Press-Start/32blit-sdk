@@ -5,12 +5,12 @@
  * fbdev is the simplest way to get pixels on a Linux display: the kernel
  * exposes the screen as a block of memory that we map and write into.
  * It has no vsync or page flipping, so frames can tear. Stage 1.2 adds a
- * DRM/KMS backend behind the same three functions and keeps this one as
- * the fallback.
+ * DRM/KMS backend behind the same functions and keeps this one as the
+ * fallback.
  *
- * The game's frame (160x120 or 320x240) is scaled by a whole number and
- * centred on the panel with black borders. If the panel is smaller than
- * the scaled frame, the edges are cropped.
+ * The game's screen is shown at the largest whole-number scale that fits
+ * the panel, centred with black borders (screen_fit.hpp). The pixel
+ * conversion itself lives in panel.cpp.
  */
 #pragma once
 
@@ -28,14 +28,17 @@ namespace blit_linux {
    */
   bool display_init();
 
+  /** \brief Visible panel size in pixels; 0x0 before display_init() succeeds. */
+  blit::Size display_size();
+
   /**
    * \brief Convert one game frame to the panel's format and copy it on screen.
    *
-   * \param frame The game's framebuffer: data, size, pixel format
-   *              (`RGB`, `RGB565` or `P`) and palette (for `P`).
-   * \param scale Whole-number scale factor (2 for lores, 1 for hires).
+   * \param frame The game's screen: data, size, pixel format (`RGB`,
+   *              `RGB565` or `P`) and palette (for `P`). Its size must fit
+   *              the panel (set_screen_mode_format() only accepts sizes that do).
    */
-  void display_present(const blit::SurfaceInfo &frame, int scale);
+  void display_present(const blit::SurfaceInfo &frame);
 
   /** \brief Clear the screen, unmap and close the device. Safe to call more than once. */
   void display_shutdown();
