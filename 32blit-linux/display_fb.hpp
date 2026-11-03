@@ -4,9 +4,9 @@
  *
  * fbdev is the simplest way to get pixels on a Linux display: the kernel
  * exposes the screen as a block of memory that we map and write into.
- * It has no vsync or page flipping, so frames can tear. Stage 1.2 adds a
- * DRM/KMS backend behind the same functions and keeps this one as the
- * fallback.
+ * It has no vsync or page flipping, so frames can tear. A DRM/KMS backend
+ * with vsync is planned behind the same functions, with this one kept as
+ * the fallback.
  *
  * The game's screen is shown at the largest whole-number scale that fits
  * the panel, centred with black borders (screen_fit.hpp). The pixel

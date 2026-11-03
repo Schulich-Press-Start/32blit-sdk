@@ -6,8 +6,8 @@
  * in the panel's layout, `scale` times horizontally; each output row is then
  * copied `scale - 1` more times for vertical scaling.
  *
- * The conversion is plain C++. NEON comes later, once frame times are
- * measured on the board (Stage 1.2 step 10).
+ * The conversion is plain C++. NEON is a later optimisation, once frame
+ * times have been measured on the board.
  */
 #include "panel.hpp"
 

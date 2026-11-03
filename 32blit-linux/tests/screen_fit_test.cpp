@@ -23,7 +23,7 @@ namespace {
   const Size dev_board_panel(480, 272);
   const Size panel_640x480(640, 480);
 
-  TEST(ScreenFit, DefaultModesKeepTheirStage11PlaceOnTheDevBoardPanel) {
+  TEST(ScreenFit, DefaultModesKeepTheirPlaceOnTheDevBoardPanel) {
     EXPECT_TRUE(fit_is(fit_screen(dev_board_panel, Size(160, 120)), 2, 80, 16));
     EXPECT_TRUE(fit_is(fit_screen(dev_board_panel, Size(320, 240)), 1, 80, 16));
   }

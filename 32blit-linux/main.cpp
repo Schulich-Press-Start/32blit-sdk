@@ -68,14 +68,14 @@ namespace blit_linux {
 
     /** \name Main loop timing */
     ///@{
-    /// Time between rendered frames. ~60 Hz until DRM vsync paces frames (Stage 1.2).
+    /// Time between rendered frames: about 60 Hz. fbdev has no vsync to pace frames.
     constexpr uint64_t frame_interval_us = 16667;
 
     /// Holding HOME this long exits the game.
     constexpr uint32_t home_hold_exit_ms = 1000;
     ///@}
 
-    /// Audio channels the engine mixes. Nothing plays them until the ALSA thread (Stage 1.2).
+    /// Audio channels the engine mixes. Nothing plays them yet: the port has no audio output.
     blit::AudioChannel channels[CHANNEL_COUNT];
 
     /// `--launch_path` argument: a file the game was asked to open (as on the 32blit console).

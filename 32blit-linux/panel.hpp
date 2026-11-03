@@ -8,7 +8,7 @@
  * describes one layout and present_frame() converts a 32blit frame into it.
  *
  * The display backends only find the panel's memory and layout; the
- * conversion here is shared by all of them (fbdev now, DRM in Stage 1.2) and
+ * conversion here is shared by all of them (fbdev now, DRM later) and
  * is unit-tested without hardware (tests/panel_test.cpp).
  */
 #pragma once
