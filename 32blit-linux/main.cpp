@@ -110,11 +110,17 @@ namespace blit_linux {
       nanosleep(&ts, nullptr);
     }
 
-    /** \brief Undo everything main() set up. Runs at exit, however the game exits. */
+    /**
+     * \brief Undo everything main() set up. Runs at exit, however the game exits.
+     *
+     * The screen is cleared before the console goes back to text mode:
+     * switching back redraws the console's text, and clearing afterwards
+     * would wipe it.
+     */
     void shutdown_port() {
-      console_restore();
       input_shutdown();
       display_shutdown();
+      console_restore();
     }
 
     // ---- blit::api functions -------------------------------------------------
