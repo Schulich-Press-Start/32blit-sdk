@@ -25,7 +25,8 @@ Open "Developer Command Prompt for VS 2022." This is where you'll build the 32bl
 Install the 32blit tools:
 
 ```
-py -m pip install 32blit
+# 32blit tools 0.7.4 import ConstBitStream, which bitstring 5 removed
+py -m pip install 32blit "bitstring<5"
 ```
 
 This may result in a waning similar to:
