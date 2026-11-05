@@ -45,7 +45,10 @@ Then install 32blit tools itself.
 pip3 install 32blit
 ```
 
-TODO: Document install of `construct` and `bitstring` for Python 3 (probably need a requirements.txt for the tools directory)
+```shell
+pip3 install 32blit construct "bitstring<5"
+```
+Note: bitstring 5 removed `ConstBitStream` which 32blit tools requires.
 
 
 ####  Verifying install
