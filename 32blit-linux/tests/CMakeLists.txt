@@ -1,11 +1,13 @@
 # Unit tests for 32blit-linux.
 #
-# Built only when configured with -DBLIT_LINUX_TESTS=ON (see 32blit-config.cmake),
-# and only for the PC (host) build, never for the static ARM build.
+# Built only when configured with -DBLIT_LINUX_TESTS=ON (see 32blit-config.cmake).
 #
 #   cmake -S . -B build -D32BLIT_LINUX=ON -DBLIT_LINUX_TESTS=ON
 #   cmake --build build
 #   ctest --test-dir build --output-on-failure
+#
+# With -DCMAKE_TOOLCHAIN_FILE=t113.toolchain instead of -D32BLIT_LINUX=ON, the
+# tests build as ARM code and ctest runs them through qemu-arm.
 
 include(FetchContent)
 
