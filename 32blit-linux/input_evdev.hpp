@@ -28,6 +28,15 @@ namespace blit_linux {
    */
   uint32_t input_poll();
 
+  /**
+   * \brief Wait until no key is held on any input device, or `timeout_ms` has passed.
+   *
+   * Called before the console is handed back. A key still held when the game
+   * exits (HOME after hold-to-quit, a D-pad direction, ...) would otherwise
+   * keep auto-repeating into the shell, or whatever runs next.
+   */
+  void input_wait_released(uint32_t timeout_ms);
+
   /** \brief Close all input devices. Safe to call more than once. */
   void input_shutdown();
 }

@@ -74,7 +74,7 @@ Any of these quits the game:
 - press **Ctrl+C**;
 - the game calls the engine's exit function (`blit::api.exit(is_error)`).
 
-The exit code is 1 if the game exited with an error, otherwise 0. The console is restored on every exit, including crashes and signals.
+The exit code is 1 if the game exited with an error, otherwise 0. The console is restored on every exit, including crashes and signals. Before handing the console back, the game waits until every key is released (at most 2 seconds), so a key still held, such as HOME after holding it to quit, doesn't keep repeating into the shell.
 
 ## Screen sizes
 

@@ -74,6 +74,9 @@ namespace blit_linux {
 
     /// Holding HOME this long exits the game.
     constexpr uint32_t home_hold_exit_ms = 1000;
+
+    /// On exit, the longest wait for held keys to be released before the console is handed back.
+    constexpr uint32_t exit_key_release_wait_ms = 2000;
     ///@}
 
     /// Audio channels the engine mixes. Nothing plays them yet: the port has no audio output.
@@ -113,11 +116,17 @@ namespace blit_linux {
     /**
      * \brief Undo everything main() set up. Runs at exit, however the game exits.
      *
+     * First waits (at most exit_key_release_wait_ms) until no key is held:
+     * a key held when the game exits, such as HOME after hold-to-quit, would
+     * otherwise keep auto-repeating into the shell. Keys typed meanwhile are
+     * dropped when the console is restored.
+     *
      * The screen is cleared before the console goes back to text mode:
      * switching back redraws the console's text, and clearing afterwards
      * would wipe it.
      */
     void shutdown_port() {
+      input_wait_released(exit_key_release_wait_ms);
       input_shutdown();
       display_shutdown();
       console_restore();

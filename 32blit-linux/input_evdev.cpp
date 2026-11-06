@@ -17,6 +17,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,20 @@ namespace blit_linux {
     }
 
     return buttons;
+  }
+
+  void input_wait_released(uint32_t timeout_ms) {
+    constexpr uint32_t step_ms = 10;
+    const timespec step = {0, long(step_ms) * 1000000};
+
+    // counting steps rather than reading the clock: a signal cutting a sleep short only shortens the wait
+    for(uint32_t waited_ms = 0; ; waited_ms += step_ms) {
+      input_poll();
+      if(held.none() || waited_ms >= timeout_ms)
+        return;
+
+      nanosleep(&step, nullptr);
+    }
   }
 
   void input_shutdown() {
