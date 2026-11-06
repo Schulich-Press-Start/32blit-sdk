@@ -1,0 +1,58 @@
+# Static ARM build of 32blit-linux games for the Allwinner T113-S3
+# (Cortex-A7, NEON, hard float).
+#
+#   cmake -S 32blit-examples -B build.t113 -DCMAKE_TOOLCHAIN_FILE=32blit-sdk/t113.toolchain
+#
+# Each game builds into one statically linked executable that needs nothing
+# else on the device. The compiler is Bootlin's armv7-eabihf musl toolchain
+# (tools/get-t113-toolchain.sh downloads it). musl, because it links fully
+# static cleanly; glibc's static build can't use getpwnam(), dlopen() and
+# similar.
+#
+# Where the toolchain is: the T113_TOOLCHAIN_DIR CMake or environment
+# variable, otherwise ~/x-tools/<toolchain name>, where the script puts it.
+
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR arm)
+
+if(NOT T113_TOOLCHAIN_DIR)
+	if(DEFINED ENV{T113_TOOLCHAIN_DIR})
+		set(T113_TOOLCHAIN_DIR $ENV{T113_TOOLCHAIN_DIR})
+	else()
+		set(T113_TOOLCHAIN_DIR $ENV{HOME}/x-tools/armv7-eabihf--musl--stable-2026.08-1)
+	endif()
+endif()
+set(T113_TOOLCHAIN_DIR ${T113_TOOLCHAIN_DIR} CACHE PATH "Bootlin armv7-eabihf musl toolchain folder")
+# try_compile() reads this file again in a separate project; pass the folder on
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES T113_TOOLCHAIN_DIR)
+
+set(T113_TOOL_PREFIX ${T113_TOOLCHAIN_DIR}/bin/arm-buildroot-linux-musleabihf-)
+if(NOT EXISTS ${T113_TOOL_PREFIX}gcc)
+	message(FATAL_ERROR "T113 toolchain not found in ${T113_TOOLCHAIN_DIR}\nRun 32blit-sdk/tools/get-t113-toolchain.sh, or set T113_TOOLCHAIN_DIR to where it is\n")
+endif()
+
+set(CMAKE_C_COMPILER ${T113_TOOL_PREFIX}gcc)
+set(CMAKE_CXX_COMPILER ${T113_TOOL_PREFIX}g++)
+set(CMAKE_SYSROOT ${T113_TOOLCHAIN_DIR}/arm-buildroot-linux-musleabihf/sysroot)
+
+set(T113_CPU_FLAGS "-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard")
+set(CMAKE_C_FLAGS_INIT "${T113_CPU_FLAGS}")
+set(CMAKE_CXX_FLAGS_INIT "${T113_CPU_FLAGS}")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
+
+# Libraries and headers come only from the ARM sysroot; programs (Python and
+# the 32blit tools) from the build machine. Packages from both, so
+# find_package() still finds the SDK itself.
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+
+# With qemu-user installed (qemu-arm), ctest runs the unit tests as ARM code
+# on the build machine.
+find_program(T113_QEMU qemu-arm)
+if(T113_QEMU)
+	set(CMAKE_CROSSCOMPILING_EMULATOR ${T113_QEMU})
+endif()
+
+set(32BLIT_LINUX ON)
