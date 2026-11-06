@@ -35,7 +35,7 @@
 #include "engine/engine.hpp"
 
 #include "console.hpp"
-#include "display_fb.hpp"
+#include "display.hpp"
 #include "file.hpp"
 #include "input_evdev.hpp"
 #include "screen_fit.hpp"
@@ -69,9 +69,6 @@ namespace blit_linux {
 
     /** \name Main loop timing */
     ///@{
-    /// Time between rendered frames: about 60 Hz. fbdev has no vsync to pace frames.
-    constexpr uint64_t frame_interval_us = 16667;
-
     /// Holding HOME this long exits the game.
     constexpr uint32_t home_hold_exit_ms = 1000;
 
@@ -88,6 +85,9 @@ namespace blit_linux {
     /// `--save_dir` argument: where this game's saves go, or nullptr for `<game dir>/saves/<title>/`.
     const char *save_dir = nullptr;
 
+    /// `--display` argument: which display backend to use.
+    DisplayBackend display_backend = DisplayBackend::automatic;
+
     /// Port start time; now() and the µs timer count from here.
     timespec start_time;
 
@@ -98,19 +98,6 @@ namespace blit_linux {
       timespec ts;
       clock_gettime(CLOCK_MONOTONIC, &ts);
       return uint64_t(ts.tv_sec - start_time.tv_sec) * 1000000 + (ts.tv_nsec - start_time.tv_nsec) / 1000;
-    }
-
-    /** \brief Sleep until `elapsed_us()` reaches `target_us`. Returns early on a signal. */
-    void sleep_until_us(uint64_t target_us) {
-      uint64_t now = elapsed_us();
-      if(target_us <= now)
-        return;
-
-      timespec ts;
-      uint64_t wait_us = target_us - now;
-      ts.tv_sec = time_t(wait_us / 1000000);
-      ts.tv_nsec = long(wait_us % 1000000) * 1000;
-      nanosleep(&ts, nullptr);
     }
 
     /**
@@ -368,6 +355,8 @@ namespace blit_linux {
      * \return Process exit code.
      */
     int run_loop() {
+      // DRM: vblank paces frames, this only caps the rate where vblank is fake; fbdev: this is the pacing
+      const uint64_t frame_interval_us = display_frame_interval_us();
       uint64_t next_frame_us = elapsed_us();
       bool home_down = false;
       uint32_t home_down_since = 0;
@@ -393,7 +382,7 @@ namespace blit_linux {
         int ms_to_update = blit::tick(time);
 
         uint64_t now_us = elapsed_us();
-        if(now_us >= next_frame_us) {
+        if(now_us >= next_frame_us && display_ready()) {
           blit::render(now());
 
           blit::SurfaceInfo frame;
@@ -410,8 +399,15 @@ namespace blit_linux {
             next_frame_us = now_us + frame_interval_us;
         }
 
-        uint64_t next_update_us = elapsed_us() + uint64_t(ms_to_update > 0 ? ms_to_update : 0) * 1000;
-        sleep_until_us(next_frame_us < next_update_us ? next_frame_us : next_update_us);
+        // sleep until the next update, or the next frame if the display can take one; a
+        // completing page flip wakes the wait early, so a frame held back by it isn't late
+        uint64_t wake_us = elapsed_us() + uint64_t(ms_to_update > 0 ? ms_to_update : 0) * 1000;
+        if(display_ready() && next_frame_us < wake_us)
+          wake_us = next_frame_us;
+
+        now_us = elapsed_us();
+        if(wake_us > now_us)
+          display_wait(wake_us - now_us);
       }
 
       return EXIT_SUCCESS;
@@ -422,6 +418,7 @@ namespace blit_linux {
       printf("Usage: %s <options>\n\n", argv0);
       printf(" --launch_path <file> -- File for the game to open (as the 32blit launcher would pass).\n");
       printf(" --save_dir <dir>     -- Folder for this game's saves (default: <game dir>/saves/<title>/).\n");
+      printf(" --display <backend>  -- auto (default: DRM, else fbdev), drm or fbdev.\n");
       printf(" --info               -- Print metadata info and exit.\n");
       printf(" --help               -- Show this help.\n\n");
       printf("Controls: arrows/WASD = D-pad, Z X C V = A B X Y, 1 = HOME (hold to quit), 2/Esc = MENU\n");
@@ -453,6 +450,11 @@ int main(int argc, char *argv[]) {
       launch_path = argv[++i];
     } else if(arg == "--save_dir" && i + 1 < argc) {
       save_dir = argv[++i];
+    } else if(arg == "--display" && i + 1 < argc) {
+      if(!parse_display_backend(argv[++i], display_backend)) {
+        fprintf(stderr, "Unknown display backend %s (use auto, drm or fbdev)\n", argv[i]);
+        return EXIT_FAILURE;
+      }
     } else if(arg == "--info") {
       printf("%s %s\n\n%s\n\n", metadata_title, metadata_version, metadata_description);
       printf(" Category: %s\n Author:   %s\n URL:      %s\n", metadata_category, metadata_author, metadata_url);
@@ -474,7 +476,7 @@ int main(int argc, char *argv[]) {
 
   file_init(metadata_title, save_dir);
 
-  if(!display_init())
+  if(!display_init(display_backend))
     return EXIT_FAILURE;
 
   // big enough for the largest screen a game may ask for: the whole panel, 3 bytes per pixel

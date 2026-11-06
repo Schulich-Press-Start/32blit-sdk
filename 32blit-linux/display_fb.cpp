@@ -1,6 +1,6 @@
 /**
  * \file display_fb.cpp
- * \brief fbdev implementation of the display functions.
+ * \brief fbdev display backend.
  *
  * How it works:
  * 1. `FBIOGET_VSCREENINFO` / `FBIOGET_FSCREENINFO` tell us the resolution,
@@ -34,7 +34,7 @@ namespace blit_linux {
     uint8_t *fb_map = nullptr;
     size_t fb_map_size = 0;
 
-    /// Visible screen inside fb_map; `pixels` is null until display_init() succeeds.
+    /// Visible screen inside fb_map; `pixels` is null until fb_init() succeeds.
     PanelBuffer panel;
     PanelFormat panel_format;
 
@@ -55,7 +55,7 @@ namespace blit_linux {
     }
   }
 
-  bool display_init() {
+  bool fb_init() {
     fb_fd = open(device_path, O_RDWR | O_CLOEXEC);
     if(fb_fd < 0) {
       fprintf(stderr, "32blit-linux: cannot open %s: %s\n", device_path, strerror(errno));
@@ -66,7 +66,7 @@ namespace blit_linux {
     fb_fix_screeninfo fix;
     if(ioctl(fb_fd, FBIOGET_VSCREENINFO, &var) != 0 || ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) != 0) {
       fprintf(stderr, "32blit-linux: cannot read %s mode: %s\n", device_path, strerror(errno));
-      display_shutdown();
+      fb_shutdown();
       return false;
     }
 
@@ -76,7 +76,7 @@ namespace blit_linux {
     || !make_channel(var.red, panel_format.red) || !make_channel(var.green, panel_format.green) || !make_channel(var.blue, panel_format.blue)) {
       fprintf(stderr, "32blit-linux: unsupported framebuffer format (%u bpp, type %u, visual %u)\n",
               var.bits_per_pixel, fix.type, fix.visual);
-      display_shutdown();
+      fb_shutdown();
       return false;
     }
 
@@ -91,7 +91,7 @@ namespace blit_linux {
     if(map == MAP_FAILED) {
       fprintf(stderr, "32blit-linux: cannot map %s: %s\n", device_path, strerror(errno));
       fb_map_size = 0;
-      display_shutdown();
+      fb_shutdown();
       return false;
     }
 
@@ -111,11 +111,11 @@ namespace blit_linux {
     return true;
   }
 
-  blit::Size display_size() {
+  blit::Size fb_size() {
     return panel.pixels ? panel.size : blit::Size();
   }
 
-  void display_present(const blit::SurfaceInfo &frame) {
+  void fb_present(const blit::SurfaceInfo &frame) {
     if(!panel.pixels)
       return;
 
@@ -128,7 +128,7 @@ namespace blit_linux {
     present_frame(panel, panel_format, frame, fit_screen(panel.size, frame.bounds));
   }
 
-  void display_shutdown() {
+  void fb_shutdown() {
     if(panel.pixels)
       clear_panel(panel, panel_format);
 

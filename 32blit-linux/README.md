@@ -1,20 +1,21 @@
 # 32blit-linux
 
-A port of the 32blit SDK to Linux that draws straight to the framebuffer: no window system, no SDL. 32blit games build for it unchanged, from the same project folder as the desktop (SDL) build.
+A port of the 32blit SDK to Linux that draws straight to the display: no window system, no SDL. 32blit games build for it unchanged, from the same project folder as the desktop (SDL) build.
 
 | Part | Uses |
 |---|---|
-| Screen | `/dev/fb0` (16- or 32-bit true colour, any channel order) |
+| Screen | DRM/KMS (`/dev/dri/card*`, through libdrm): two buffers and page flips, so no tearing and frames paced by the panel's refresh. Falls back to the framebuffer device (`/dev/fb0`, 16- or 32-bit true colour, any channel order; no vsync) |
 | Buttons | Every input device under `/dev/input` (keyboards, gamepads, devicetree `gpio-keys`) |
 | Files and saves | POSIX file calls |
 | Time | `CLOCK_MONOTONIC` |
 
 ## Building a game
 
-The 32blit tools must be installed. Pin `bitstring`: 32blit tools 0.7.4 fail with bitstring 5.
+The 32blit tools must be installed. Pin `bitstring`: 32blit tools 0.7.4 fail with bitstring 5. The port also needs libdrm and pkg-config:
 
 ```sh
 python3 -m pip install 32blit "bitstring<5"
+sudo apt install libdrm-dev pkg-config   # Debian/Ubuntu
 ```
 
 Then configure with `-D32BLIT_LINUX=ON`. For example, the 32blit examples, cloned into the folder that contains `32blit-sdk` (they look for the SDK at `../32blit-sdk`):
@@ -31,10 +32,11 @@ Without the flag, the same project builds for the desktop (SDL) instead.
 
 `t113.toolchain`, in the SDK folder, builds games for the Allwinner T113-S3 (32-bit ARM Cortex-A7). Each game becomes one statically linked executable: copy it to the device and run it, nothing else to install.
 
-The compiler is Bootlin's `armv7-eabihf` musl toolchain. Download it once (x86-64 Linux or WSL, about 80 MB, installed to `~/x-tools`):
+The compiler is Bootlin's `armv7-eabihf` musl toolchain. Download it once (x86-64 Linux or WSL, about 80 MB, installed to `~/x-tools`), then build libdrm into it (static, about a minute):
 
 ```sh
 32blit-sdk/tools/get-t113-toolchain.sh
+32blit-sdk/tools/build-libdrm.sh
 ```
 
 Then configure with the toolchain file instead of `-D32BLIT_LINUX=ON`:
@@ -44,7 +46,7 @@ cmake -S 32blit-examples -B build.t113 -DCMAKE_TOOLCHAIN_FILE=32blit-sdk/t113.to
 cmake --build build.t113 -j
 ```
 
-To keep the toolchain somewhere else, pass that folder to the script, then point CMake at it with `-DT113_TOOLCHAIN_DIR=<folder>/armv7-eabihf--musl--stable-2026.08-1` (or an environment variable of the same name).
+To keep the toolchain somewhere else, pass that folder to the first script, then point CMake (and `build-libdrm.sh`) at it with `-DT113_TOOLCHAIN_DIR=<folder>/armv7-eabihf--musl--stable-2026.08-1` (or an environment variable of the same name).
 
 The ARM executables also start on an x86 Linux PC with qemu-user installed (`sudo apt install qemu-user-binfmt`): enough to check that a game runs and draws. That's all: qemu-user doesn't pass through the ioctls the port uses for input devices and the text console, so there are no buttons and console text shows through. A 32-bit ARM virtual machine (`qemu-system-arm`) runs them fully.
 
@@ -57,7 +59,7 @@ Run it from a text console (a virtual terminal, e.g. Ctrl+Alt+F3), with nothing 
 ```
 
 Permissions:
-- `/dev/fb0` needs the `video` group;
+- `/dev/dri/card*` and `/dev/fb0` need the `video` group;
 - `/dev/input/event*` needs the `input` group:
 
 ```sh
@@ -73,6 +75,7 @@ Over SSH or from a desktop terminal the game still runs, but the console can't b
 |---|---|
 | `--save_dir <dir>` | Folder for this game's saves. Default: `<game dir>/saves/<title>/`. Relative paths are taken from the current directory; missing folders are created |
 | `--launch_path <file>` | File for the game to open, as 32blit's launcher would pass |
+| `--display <backend>` | `auto` (default): DRM, or the framebuffer device if DRM can't be used (the reason is printed). `drm` or `fbdev` force one; `drm` exits with an error if DRM can't be used |
 | `--info` | Print the game's metadata and exit |
 | `--help` | List the options and controls |
 
@@ -96,6 +99,14 @@ Any of these quits the game:
 - the game calls the engine's exit function (`blit::api.exit(is_error)`).
 
 The exit code is 1 if the game exited with an error, otherwise 0. The console is restored on every exit, including crashes and signals. Before handing the console back, the game waits until every key is released (at most 2 seconds), so a key still held, such as HOME after holding it to quit, doesn't keep repeating into the shell.
+
+## Display
+
+With DRM the game takes over the display while it runs: it picks the first connected output and its preferred (native) mode, and draws into one of two buffers while the panel shows the other. Each frame is swapped in at the panel's vertical blank, so frames never tear and the game renders once per refresh. On exit it puts back what was shown before (normally the text console) and closes the device, which lets the next program (a launcher, the shell) use the display.
+
+DRM needs the display to be free: if another program controls it (a desktop, or a launcher that is still running), `auto` falls back to the framebuffer device and says why.
+
+Virtual machines' GPUs complete page flips at once instead of at a real vertical blank; frames are then capped just above the refresh rate, so tearing and frame pacing can only be judged on real hardware.
 
 ## Screen sizes
 
@@ -121,7 +132,7 @@ On a 640x480 panel, 320x240 shows at 2x and fills it.
 
 ## Unit tests
 
-Tests for the screen fit, pixel conversion and file API live in `tests/` and run on the build machine, no device needed:
+Tests for the screen fit, pixel conversion, DRM output choices and file API live in `tests/` and run on the build machine, no device needed:
 
 ```sh
 cmake -S . -B build -D32BLIT_LINUX=ON -DBLIT_LINUX_TESTS=ON
@@ -136,7 +147,7 @@ Add new tests as `tests/<name>_test.cpp` and list them in `tests/CMakeLists.txt`
 ## Not supported yet
 
 - **Audio:** the engine mixes it, but nothing plays it.
-- **Vsync:** the framebuffer device can't page-flip, so frames can tear.
+- **Vsync with the framebuffer fallback:** the framebuffer device can't page-flip, so frames can tear when DRM isn't available.
 - **JPEG decoding:** `blit::decode_jpeg_*` crashes on this port (the `jpeg` example builds but crashes when it decodes).
 - **Multiplayer:** the link always reports "not connected".
 - **Launcher and flash functions:** not supported; games are started by a separate program.
