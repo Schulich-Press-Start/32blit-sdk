@@ -1,0 +1,6 @@
+title: Screen Sizes
+description: Asks for a series of screen sizes and draws a pattern that shows where each lands on the panel and how sharply it is scaled. A next size, B previous.
+author: Schulich Press Start
+version: v1.0.0
+url: https://github.com/Schulich-Press-Start/32blit-sdk
+category: demo

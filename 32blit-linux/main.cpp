@@ -88,6 +88,9 @@ namespace blit_linux {
     /// `--display` argument: which display backend to use.
     DisplayBackend display_backend = DisplayBackend::automatic;
 
+    /// `--scaler` argument: whether the display engine (DRM) or the CPU scales the game's screen.
+    ScalerMode display_scaler = ScalerMode::automatic;
+
     /// Port start time; now() and the µs timer count from here.
     timespec start_time;
 
@@ -419,6 +422,8 @@ namespace blit_linux {
       printf(" --launch_path <file> -- File for the game to open (as the 32blit launcher would pass).\n");
       printf(" --save_dir <dir>     -- Folder for this game's saves (default: <game dir>/saves/<title>/).\n");
       printf(" --display <backend>  -- auto (default: DRM, else fbdev), drm or fbdev.\n");
+      printf(" --scaler <mode>      -- Who scales the screen with DRM: auto (default: the display engine if it keeps\n");
+      printf("                         pixels sharp), on (the display engine whenever it can) or off (the CPU).\n");
       printf(" --info               -- Print metadata info and exit.\n");
       printf(" --help               -- Show this help.\n\n");
       printf("Controls: arrows/WASD = D-pad, Z X C V = A B X Y, 1 = HOME (hold to quit), 2/Esc = MENU\n");
@@ -455,6 +460,11 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Unknown display backend %s (use auto, drm or fbdev)\n", argv[i]);
         return EXIT_FAILURE;
       }
+    } else if(arg == "--scaler" && i + 1 < argc) {
+      if(!parse_scaler_mode(argv[++i], display_scaler)) {
+        fprintf(stderr, "Unknown scaler mode %s (use auto, on or off)\n", argv[i]);
+        return EXIT_FAILURE;
+      }
     } else if(arg == "--info") {
       printf("%s %s\n\n%s\n\n", metadata_title, metadata_version, metadata_description);
       printf(" Category: %s\n Author:   %s\n URL:      %s\n", metadata_category, metadata_author, metadata_url);
@@ -476,7 +486,7 @@ int main(int argc, char *argv[]) {
 
   file_init(metadata_title, save_dir);
 
-  if(!display_init(display_backend))
+  if(!display_init(display_backend, display_scaler))
     return EXIT_FAILURE;
 
   // big enough for the largest screen a game may ask for: the whole panel, 3 bytes per pixel

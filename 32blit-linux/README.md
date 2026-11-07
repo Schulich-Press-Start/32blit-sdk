@@ -76,6 +76,7 @@ Over SSH or from a desktop terminal the game still runs, but the console can't b
 | `--save_dir <dir>` | Folder for this game's saves. Default: `<game dir>/saves/<title>/`. Relative paths are taken from the current directory; missing folders are created |
 | `--launch_path <file>` | File for the game to open, as 32blit's launcher would pass |
 | `--display <backend>` | `auto` (default): DRM, or the framebuffer device if DRM can't be used (the reason is printed). `drm` or `fbdev` force one; `drm` exits with an error if DRM can't be used |
+| `--scaler <mode>` | Who scales the game's screen with DRM (see "Screen sizes"): `auto` (default), `on` or `off` |
 | `--info` | Print the game's metadata and exit |
 | `--help` | List the options and controls |
 
@@ -122,6 +123,26 @@ The screen is shown at the largest whole-number scale that fits the panel, centr
 - 320x240 and 480x270 show at 1x.
 
 On a 640x480 panel, 320x240 shows at 2x and fills it.
+
+### Who scales: the display engine or the CPU
+
+With DRM, the display engine can do the scale step: the game's screen is converted at 1x and a plane enlarges it, so the CPU writes 4 times fewer pixels at 2x (9 times at 3x). Display engines may smooth the enlarged pixels, which blurs pixel art, so `--scaler`:
+
+| Mode | The display engine scales when |
+|---|---|
+| `auto` (default) | The driver accepts the size and offers nearest-neighbour filtering (sharp pixels). Otherwise the CPU scales, as before |
+| `on` | The driver accepts the size, whatever its filtering. Use it to compare sharpness and speed on a device |
+| `off` | Never; the CPU always scales |
+
+The driver is asked once per screen size (a test-only atomic commit), and the result is printed, e.g. `DRM: 160x120 shown at 2x by the display engine` or `DRM: the display engine can't show 160x120 at 4x; scaling on the CPU`. Virtual machines' GPUs (virtio-gpu) can't scale, so there the CPU always does.
+
+`test-games/screen-sizes` steps through 160x120, 320x240, 480x270, 640x480, 96x96 and 3840x2160 with A (B goes back), and draws a checkerboard, a 1-pixel border and a diagonal to show where each size lands and how sharp it is:
+
+```sh
+cmake -S 32blit-sdk/32blit-linux/test-games/screen-sizes -B build.ss -D32BLIT_LINUX=ON
+cmake --build build.ss
+./build.ss/screen-sizes --scaler on
+```
 
 ## Files and saves
 

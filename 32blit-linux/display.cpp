@@ -34,9 +34,22 @@ namespace blit_linux {
     return true;
   }
 
-  bool display_init(DisplayBackend backend) {
+  bool parse_scaler_mode(const char *name, ScalerMode &scaler) {
+    if(strcmp(name, "auto") == 0)
+      scaler = ScalerMode::automatic;
+    else if(strcmp(name, "on") == 0)
+      scaler = ScalerMode::on;
+    else if(strcmp(name, "off") == 0)
+      scaler = ScalerMode::off;
+    else
+      return false;
+
+    return true;
+  }
+
+  bool display_init(DisplayBackend backend, ScalerMode scaler) {
     if(backend != DisplayBackend::fbdev) {
-      using_drm = drm_init();
+      using_drm = drm_init(scaler);
       if(using_drm)
         return true;
       if(backend == DisplayBackend::drm)

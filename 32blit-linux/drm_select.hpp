@@ -4,17 +4,19 @@
  *
  * Which connector (output) to use, which of its modes, which CRTC (the
  * display-engine block that scans a buffer out to it), which pixel format,
- * and how often to present frames. display_drm.cpp copies the driver's
- * answers into the small structs below and asks these functions; keeping
- * them free of libdrm types means they are unit-tested without hardware
- * (tests/drm_select_test.cpp).
+ * how often to present frames, and whether and how a plane scales the game's
+ * screen. display_drm.cpp copies the driver's answers into the small structs
+ * below and asks these functions; keeping them free of libdrm types means
+ * they are unit-tested without hardware (tests/drm_select_test.cpp).
  */
 #pragma once
 
 #include <cstdint>
 #include <vector>
 
+#include "display.hpp"
 #include "panel.hpp"
+#include "screen_fit.hpp"
 
 namespace blit_linux {
 
@@ -143,5 +145,56 @@ namespace blit_linux {
     // period in µs = htotal * vtotal / (clock_khz * 1000) * 1e6
     const uint64_t period_us = uint64_t(mode.htotal) * uint64_t(mode.vtotal) * 1000 / mode.clock_khz;
     return period_us * 9 / 10;
+  }
+
+  /** \brief A rectangle on a plane: where it reads from its buffer, or where it shows on the panel. */
+  struct PlaneRect {
+    uint32_t x = 0, y = 0, w = 0, h = 0;
+  };
+
+  /** \brief A plane's source rectangle (in the buffer, 16.16 fixed point, as DRM wants) and destination (panel pixels). */
+  struct PlaneRects {
+    PlaneRect src;
+    PlaneRect dst;
+  };
+
+  /**
+   * \brief Rectangles for the display engine to scale the game's screen.
+   *
+   * The screen is drawn at 1x into the buffer's top-left corner; the plane
+   * reads that `screen`-sized area and shows it at `fit`'s scale and position.
+   */
+  inline PlaneRects scaled_plane_rects(blit::Size screen, const ScreenFit &fit) {
+    PlaneRects rects;
+    rects.src = {0, 0, uint32_t(screen.w) << 16, uint32_t(screen.h) << 16};
+    rects.dst = {uint32_t(fit.x), uint32_t(fit.y), uint32_t(screen.w * fit.scale), uint32_t(screen.h * fit.scale)};
+    return rects;
+  }
+
+  /** \brief Rectangles that show a whole panel-sized buffer unscaled (the CPU-scaling layout). */
+  inline PlaneRects full_plane_rects(blit::Size panel) {
+    PlaneRects rects;
+    rects.src = {0, 0, uint32_t(panel.w) << 16, uint32_t(panel.h) << 16};
+    rects.dst = {0, 0, uint32_t(panel.w), uint32_t(panel.h)};
+    return rects;
+  }
+
+  /**
+   * \brief Whether to ask the display engine to scale this screen (it may still refuse).
+   *
+   * `automatic` asks only when there is scaling to do (more than 1x) and the
+   * driver offers nearest-neighbour filtering, so pixels stay sharp. `on`
+   * asks for every size, including 1x (useful to test the plane path).
+   */
+  inline bool want_plane_scaling(ScalerMode mode, const ScreenFit &fit, bool nearest_filter) {
+    switch(mode) {
+      case ScalerMode::off:
+        return false;
+      case ScalerMode::on:
+        return true;
+      case ScalerMode::automatic:
+        return fit.scale > 1 && nearest_filter;
+    }
+    return false;
   }
 }
