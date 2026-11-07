@@ -11,7 +11,8 @@
  *
  * The game's screen is shown at the largest whole-number scale that fits
  * the panel, centred with black borders (screen_fit.hpp). Both backends use
- * the same conversion code (panel.cpp).
+ * the same conversion code (panel.cpp). With DRM, the display engine can do
+ * the scale step instead of the CPU (ScalerMode).
  *
  * Main loop use: render and present a frame only when display_ready() and
  * at least display_frame_interval_us() have passed since the last one; sleep
@@ -34,6 +35,24 @@ namespace blit_linux {
   };
 
   /**
+   * \brief Whether the display engine does the scale step (`--scaler` option, DRM only).
+   *
+   * With the display engine scaling, the game's screen is converted into the
+   * buffer at 1x and a plane scales it to fit the panel, so the CPU writes
+   * scale² times fewer pixels. Display engines may smooth the scaled pixels,
+   * which blurs pixel art; `automatic` only uses it when the driver offers
+   * nearest-neighbour filtering.
+   */
+  enum class ScalerMode {
+    /// The display engine when it can scale this size and keep pixels sharp; otherwise the CPU.
+    automatic,
+    /// The display engine whenever it accepts the size, even if it may smooth pixels.
+    on,
+    /// Always the CPU.
+    off,
+  };
+
+  /**
    * \brief Parse a `--display` value.
    * \param name `auto`, `drm` or `fbdev`.
    * \return false for anything else.
@@ -41,10 +60,18 @@ namespace blit_linux {
   bool parse_display_backend(const char *name, DisplayBackend &backend);
 
   /**
+   * \brief Parse a `--scaler` value.
+   * \param name `auto`, `on` or `off`.
+   * \return false for anything else.
+   */
+  bool parse_scaler_mode(const char *name, ScalerMode &scaler);
+
+  /**
    * \brief Open the display and clear it to black.
+   * \param scaler Used by the DRM backend; fbdev always scales on the CPU.
    * \return false if no backend could be used (reasons printed to stderr).
    */
-  bool display_init(DisplayBackend backend);
+  bool display_init(DisplayBackend backend, ScalerMode scaler);
 
   /** \brief Visible panel size in pixels; 0x0 before display_init() succeeds. */
   blit::Size display_size();

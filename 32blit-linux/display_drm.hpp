@@ -7,6 +7,10 @@
  * a page flip swaps them at the panel's vertical blank. The buffers are
  * "dumb" buffers (plain memory, no GPU), which every KMS driver supports.
  *
+ * If the driver supports atomic mode setting and its primary plane can
+ * scale, the display engine can do the scale step: the frame is drawn at 1x
+ * and the plane shows it enlarged (ScalerMode). Otherwise the CPU scales.
+ *
  * The game owns the display (is DRM master) while it runs; on exit it puts
  * back whatever was shown before (the text console, normally) and closes
  * the device, which hands the display to the next program.
@@ -15,6 +19,7 @@
 
 #include <cstdint>
 
+#include "display.hpp"
 #include "engine/api_private.hpp"
 
 namespace blit_linux {
@@ -24,9 +29,10 @@ namespace blit_linux {
    *
    * Tries `/dev/dri/card0` to `card7`. Prints why each card can't be used.
    *
+   * \param scaler Whether to let the display engine scale (see ScalerMode).
    * \return false if no card could be used.
    */
-  bool drm_init();
+  bool drm_init(ScalerMode scaler);
 
   /** \brief Mode size in pixels; 0x0 before drm_init() succeeds. */
   blit::Size drm_size();
