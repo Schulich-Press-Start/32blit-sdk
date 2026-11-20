@@ -27,6 +27,27 @@ cmake --build build -j
 
 Without the flag, the same project builds for the desktop (SDL) instead.
 
+## Building for the T113
+
+`t113.toolchain`, in the SDK folder, builds games for the Allwinner T113-S3 (32-bit ARM Cortex-A7). Each game becomes one statically linked executable: copy it to the device and run it, nothing else to install.
+
+The compiler is Bootlin's `armv7-eabihf` musl toolchain. Download it once (x86-64 Linux or WSL, about 80 MB, installed to `~/x-tools`):
+
+```sh
+32blit-sdk/tools/get-t113-toolchain.sh
+```
+
+Then configure with the toolchain file instead of `-D32BLIT_LINUX=ON`:
+
+```sh
+cmake -S 32blit-examples -B build.t113 -DCMAKE_TOOLCHAIN_FILE=32blit-sdk/t113.toolchain
+cmake --build build.t113 -j
+```
+
+To keep the toolchain somewhere else, pass that folder to the script, then point CMake at it with `-DT113_TOOLCHAIN_DIR=<folder>/armv7-eabihf--musl--stable-2026.08-1` (or an environment variable of the same name).
+
+The ARM executables also start on an x86 Linux PC with qemu-user installed (`sudo apt install qemu-user-binfmt`): enough to check that a game runs and draws. That's all: qemu-user doesn't pass through the ioctls the port uses for input devices and the text console, so there are no buttons and console text shows through. A 32-bit ARM virtual machine (`qemu-system-arm`) runs them fully.
+
 ## Running a game
 
 Run it from a text console (a virtual terminal, e.g. Ctrl+Alt+F3), with nothing else drawing on the screen:
@@ -107,6 +128,8 @@ cmake -S . -B build -D32BLIT_LINUX=ON -DBLIT_LINUX_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+With `-DCMAKE_TOOLCHAIN_FILE=t113.toolchain` in place of `-D32BLIT_LINUX=ON`, the same tests build as ARM code and `ctest` runs them through `qemu-arm` (from `qemu-user`). That catches ARM-only problems such as unsigned `char` or alignment.
 
 Add new tests as `tests/<name>_test.cpp` and list them in `tests/CMakeLists.txt`.
 
