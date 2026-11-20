@@ -36,7 +36,7 @@ libsdl2-dev libsdl2-image-dev libsdl2-net-dev unzip
 And install the 32blit tools with pip3:
 
 ```
-pip3 install 32blit
+pip3 install 32blit construct "bitstring<5"
 ```
 
 ## Building & Running on 32Blit
