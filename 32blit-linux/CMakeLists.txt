@@ -9,6 +9,8 @@
 add_library(BlitHalLinux STATIC
 	console.cpp
 	default_metadata.cpp
+	display.cpp
+	display_drm.cpp
 	display_fb.cpp
 	file.cpp
 	input_evdev.cpp
@@ -17,6 +19,20 @@ add_library(BlitHalLinux STATIC
 )
 
 target_link_libraries(BlitHalLinux PUBLIC BlitEngine)
+
+# libdrm, for the DRM/KMS display (display_drm.cpp). PC builds use the distro's
+# package; the T113 build uses the one tools/build-libdrm.sh installs into the
+# toolchain's sysroot (t113.toolchain points pkg-config there).
+find_package(PkgConfig)
+if(PKG_CONFIG_FOUND)
+	pkg_check_modules(LIBDRM IMPORTED_TARGET libdrm)
+endif()
+if(NOT LIBDRM_FOUND)
+	message(FATAL_ERROR "libdrm not found.\n"
+		"PC build: install it (Debian/Ubuntu: sudo apt install libdrm-dev pkg-config).\n"
+		"T113 build: run 32blit-sdk/tools/build-libdrm.sh.\n")
+endif()
+target_link_libraries(BlitHalLinux PUBLIC PkgConfig::LIBDRM)
 
 # Build a game executable linked against the port.
 #

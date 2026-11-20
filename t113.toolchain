@@ -48,6 +48,11 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 
+# pkg-config (used for libdrm) also looks only in the ARM sysroot, where
+# tools/build-libdrm.sh installs it
+set(ENV{PKG_CONFIG_LIBDIR} ${CMAKE_SYSROOT}/usr/lib/pkgconfig)
+set(ENV{PKG_CONFIG_SYSROOT_DIR} ${CMAKE_SYSROOT})
+
 # With qemu-user installed (qemu-arm), ctest runs the unit tests as ARM code
 # on the build machine.
 find_program(T113_QEMU qemu-arm)

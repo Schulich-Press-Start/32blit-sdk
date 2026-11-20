@@ -1,16 +1,11 @@
 /**
  * \file display_fb.hpp
- * \brief Screen output through the Linux framebuffer device (`/dev/fb0`).
+ * \brief fbdev display backend: screen output through `/dev/fb0`.
  *
  * fbdev is the simplest way to get pixels on a Linux display: the kernel
- * exposes the screen as a block of memory that we map and write into.
- * It has no vsync or page flipping, so frames can tear. A DRM/KMS backend
- * with vsync is planned behind the same functions, with this one kept as
- * the fallback.
- *
- * The game's screen is shown at the largest whole-number scale that fits
- * the panel, centred with black borders (screen_fit.hpp). The pixel
- * conversion itself lives in panel.cpp.
+ * exposes the screen as a block of memory that we map and write into. It
+ * has no vsync or page flipping, so frames can tear. It is the fallback
+ * when DRM/KMS (display_drm.hpp) can't be used; display.cpp chooses.
  */
 #pragma once
 
@@ -26,20 +21,14 @@ namespace blit_linux {
    *
    * \return false if the framebuffer can't be used.
    */
-  bool display_init();
+  bool fb_init();
 
-  /** \brief Visible panel size in pixels; 0x0 before display_init() succeeds. */
-  blit::Size display_size();
+  /** \brief Visible panel size in pixels; 0x0 before fb_init() succeeds. */
+  blit::Size fb_size();
 
-  /**
-   * \brief Convert one game frame to the panel's format and copy it on screen.
-   *
-   * \param frame The game's screen: data, size, pixel format (`RGB`,
-   *              `RGB565` or `P`) and palette (for `P`). Its size must fit
-   *              the panel (set_screen_mode_format() only accepts sizes that do).
-   */
-  void display_present(const blit::SurfaceInfo &frame);
+  /** \brief Convert one game frame to the panel's format and copy it on screen (see display_present()). */
+  void fb_present(const blit::SurfaceInfo &frame);
 
   /** \brief Clear the screen, unmap and close the device. Safe to call more than once. */
-  void display_shutdown();
+  void fb_shutdown();
 }

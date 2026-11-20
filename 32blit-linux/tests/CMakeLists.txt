@@ -27,6 +27,7 @@ FetchContent_MakeAvailable(googletest)
 # Tests compile the port's .cpp files they need directly, instead of linking
 # BlitHalLinux, because that library contains the game's main().
 add_executable(blit_linux_tests
+	drm_select_test.cpp
 	file_test.cpp
 	panel_test.cpp
 	screen_fit_test.cpp
