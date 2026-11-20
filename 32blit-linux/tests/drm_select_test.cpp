@@ -1,6 +1,6 @@
 /**
  * \file drm_select_test.cpp
- * \brief Unit tests for drm_select.hpp: connector, mode, CRTC and pixel-format choices, and frame pacing.
+ * \brief Unit tests for drm_select.hpp: connector, mode, CRTC and pixel-format choices, frame pacing, and plane scaling.
  */
 #include <gtest/gtest.h>
 
@@ -108,5 +108,45 @@ namespace {
 
   TEST(DrmSelect, FrameIntervalDefaultsTo60HzWithoutTiming) {
     EXPECT_EQ(drm_frame_interval_us(mode(640, 480)), default_frame_interval_us);
+  }
+
+  TEST(DrmSelect, ScaledPlaneReadsTheScreenAt1xAndShowsItAtTheFit) {
+    // 160x120 on a 480x272 panel: 2x at (80, 16)
+    const PlaneRects rects = scaled_plane_rects(blit::Size(160, 120), fit_screen(blit::Size(480, 272), blit::Size(160, 120)));
+    EXPECT_EQ(rects.src.x, 0u);
+    EXPECT_EQ(rects.src.y, 0u);
+    EXPECT_EQ(rects.src.w, 160u << 16);  // 16.16 fixed point
+    EXPECT_EQ(rects.src.h, 120u << 16);
+    EXPECT_EQ(rects.dst.x, 80u);
+    EXPECT_EQ(rects.dst.y, 16u);
+    EXPECT_EQ(rects.dst.w, 320u);
+    EXPECT_EQ(rects.dst.h, 240u);
+  }
+
+  TEST(DrmSelect, FullPlaneShowsTheWholeBufferUnscaled) {
+    const PlaneRects rects = full_plane_rects(blit::Size(640, 480));
+    EXPECT_EQ(rects.src.w, 640u << 16);
+    EXPECT_EQ(rects.src.h, 480u << 16);
+    EXPECT_EQ(rects.dst.x, 0u);
+    EXPECT_EQ(rects.dst.y, 0u);
+    EXPECT_EQ(rects.dst.w, 640u);
+    EXPECT_EQ(rects.dst.h, 480u);
+  }
+
+  TEST(DrmSelect, AutomaticScalerNeedsScalingToDoAndSharpPixels) {
+    const ScreenFit at2x = {2, 0, 0};
+    const ScreenFit at1x = {1, 80, 16};
+    EXPECT_TRUE(want_plane_scaling(ScalerMode::automatic, at2x, true));
+    EXPECT_FALSE(want_plane_scaling(ScalerMode::automatic, at2x, false));  // would blur pixel art
+    EXPECT_FALSE(want_plane_scaling(ScalerMode::automatic, at1x, true));   // nothing to scale
+  }
+
+  TEST(DrmSelect, ScalerOnAndOffIgnoreScaleAndFilter) {
+    for(const ScreenFit fit : {ScreenFit{1, 0, 0}, ScreenFit{3, 4, 4}}) {
+      for(bool nearest : {false, true}) {
+        EXPECT_TRUE(want_plane_scaling(ScalerMode::on, fit, nearest));
+        EXPECT_FALSE(want_plane_scaling(ScalerMode::off, fit, nearest));
+      }
+    }
   }
 }
