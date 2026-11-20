@@ -3,9 +3,16 @@ class System {
 		static const Uint32 timer_event;
 		static const Uint32 loop_event;
 
-    static const int max_width = 320;
-    static const int max_height = 240;
+    static constexpr int default_width = 320;
+    static constexpr int default_height = 240;
 
+#ifndef __EMSCRIPTEN__
+    static constexpr int lores_width = default_width / 2;
+    static constexpr int lores_height = default_height / 2;
+    static constexpr int max_panel_dimension = 4096;
+#endif
+
+    // Panel dimensions on native SDL; legacy game dimensions on the web.
 		static int width;
 		static int height;
 
@@ -13,17 +20,21 @@ class System {
 		~System();
 
 		void run();
-		void stop();
+		bool stop(); // false if the game thread was detached
 
 		int update_thread();
 		int timer_thread();
 
 		bool loop();
 
+#ifdef __EMSCRIPTEN__
 		Uint32 mode();
+#else
+    SDL_Rect frame_rect() const;
+#endif
     Uint32 format();
 
-		void update_texture(SDL_Texture *);
+		bool update_texture(SDL_Texture *);
 		void notify_redraw();
 
 		void set_joystick(int axis, float value);
@@ -45,6 +56,11 @@ class System {
 		bool running = false;
 
 		Uint32 last_render_time = 0;
+#ifndef __EMSCRIPTEN__
+    uint64_t frame_work_us = 0;
+    Uint32 last_budget_warning_time = 0;
+    bool warned_frame_budget = false;
+#endif
 
 		// shadow input
 		Uint32 shadow_buttons = 0;

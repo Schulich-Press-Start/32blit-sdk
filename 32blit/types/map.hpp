@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string_view>
 #include <string>
 #include <map>
 #include <vector>
@@ -32,6 +36,8 @@ namespace blit {
     blit::Rect bounds;
 
     std::map<std::string, MapLayer> layers;
+    // TMX document order for packed maps; empty for ad hoc maps.
+    std::vector<std::string> layer_order;
     std::vector<uint8_t> flags;
 
     Map(blit::Rect bounds);
@@ -45,4 +51,11 @@ namespace blit {
     void tiles_in_rect(blit::Rect r, std::function<void(blit::Point)> f);
 
   };
+
+  // Decodes a complete BTMP v1 asset; returns nullptr for malformed data.
+  std::unique_ptr<Map> load_tiled_map(const uint8_t *data, std::size_t size);
+
+  // Extracts the second-line marker from a generated Tiled scene. The view
+  // borrows the scene text; the caller must validate and resolve the path.
+  std::string_view tiled_map_path(std::string_view generated_scene);
 }

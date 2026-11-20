@@ -98,6 +98,29 @@ endif()
 
 target_link_libraries(BlitHalSDL PUBLIC BlitEngine ${SDL2_LIBRARIES} ${SDL2_IMAGE_LIBRARY} ${SDL2_NET_LIBRARY})
 
+if(NOT EMSCRIPTEN)
+	set(BLIT_MEMORY_CAP_MB 0 CACHE STRING "Simulator C++ heap cap in MiB (0 disables)")
+	if(NOT BLIT_MEMORY_CAP_MB MATCHES "^(0|[1-9][0-9]*)$")
+		message(FATAL_ERROR "BLIT_MEMORY_CAP_MB must be a nonnegative integer")
+	endif()
+	if(BLIT_MEMORY_CAP_MB GREATER 0)
+		target_sources(BlitHalSDL PRIVATE MemoryBudget.cpp)
+		target_compile_definitions(BlitHalSDL PRIVATE BLIT_MEMORY_CAP_MB=${BLIT_MEMORY_CAP_MB})
+	endif()
+
+	option(BLIT_DEV_BRIDGE "Enable the desktop development bridge in Debug builds" ON)
+	if(BLIT_DEV_BRIDGE)
+		set(bridge_dir "${CMAKE_CURRENT_LIST_DIR}/../libs/bridge")
+		target_sources(BlitHalSDL PRIVATE "$<$<CONFIG:Debug>:${bridge_dir}/bridge.cpp>")
+		target_include_directories(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:${bridge_dir}>")
+		target_compile_definitions(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:BLIT_DEV_BRIDGE=1>")
+		target_link_libraries(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:BlitWorld>")
+		if(WIN32)
+			target_link_libraries(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:ws2_32>")
+		endif()
+	endif()
+endif()
+
 # copy SDL2 dlls to build/install dir for windows users
 set(DLLS_TO_COPY)
 

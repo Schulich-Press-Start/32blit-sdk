@@ -9,6 +9,11 @@
 #include "SDL.h"
 #include <iostream>
 
+#ifndef __EMSCRIPTEN__
+#include <charconv>
+#include <string_view>
+#endif
+
 #include "Input.hpp"
 #include "Multiplayer.hpp"
 #include "System.hpp"
@@ -17,6 +22,12 @@
 #include "UserCode.hpp"
 
 #include "contrib.hpp"
+
+#ifdef BLIT_DEV_BRIDGE
+#include <cstdlib>
+#include "bridge.hpp"
+static int bridge_exit_status = 0;
+#endif
 
 #ifdef VIDEO_CAPTURE
 #include "VideoCapture.hpp"
@@ -40,16 +51,25 @@ unsigned int last_record_startstop = 0;
 #endif
 
 void handle_event(SDL_Event &event) {
+#ifdef BLIT_DEV_BRIDGE
+	if(event.type == System::loop_event && event.user.code == -1) {
+		bridge_exit_status = 1;
+		running = false;
+		return;
+	}
+#endif
 	switch (event.type) {
 		case SDL_QUIT:
 			running = false;
 			break;
 
+#ifdef __EMSCRIPTEN__
 		case SDL_WINDOWEVENT:
 			if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
 				blit_renderer->resize(event.window.data1, event.window.data2);
 			}
 			break;
+#endif
 
 		case SDL_MOUSEBUTTONUP:
 		case SDL_MOUSEBUTTONDOWN:
@@ -149,9 +169,35 @@ void em_loop() {
 }
 #endif
 
+#ifndef __EMSCRIPTEN__
+static bool parse_panel_size(std::string_view value, char separator) {
+  const auto split = value.find(separator);
+  if(split == std::string_view::npos)
+    return false;
+
+  int width, height;
+  const auto middle = value.data() + split;
+  const auto end = value.data() + value.size();
+  const auto parsed_width = std::from_chars(value.data(), middle, width);
+  const auto parsed_height = std::from_chars(middle + 1, end, height);
+  if(parsed_width.ec != std::errc{} || parsed_width.ptr != middle ||
+     parsed_height.ec != std::errc{} || parsed_height.ptr != end ||
+     width < System::lores_width || height < System::lores_height ||
+     width > System::max_panel_dimension || height > System::max_panel_dimension)
+    return false;
+
+  System::width = width;
+  System::height = height;
+  return true;
+}
+#endif
+
 int main(int argc, char *argv[]) {
   int x = SDL_WINDOWPOS_UNDEFINED, y = SDL_WINDOWPOS_UNDEFINED;
   bool fullscreen = false;
+#ifdef BLIT_DEV_BRIDGE
+  const char *bridge_address = nullptr, *restore_path = nullptr;
+#endif
 
   std::cout << metadata_title << " " << metadata_version << std::endl;
   std::cout << "Powered by 32Blit SDL2 runtime - github.com/32blit/32blit-sdk" << std::endl << std::endl;
@@ -161,6 +207,39 @@ int main(int argc, char *argv[]) {
 
 	for(int i = 1; i < argc; i++) {
 		std::string arg_str(argv[i]);
+#ifdef BLIT_DEV_BRIDGE
+		if(arg_str == "--bridge" || arg_str == "--restore") {
+			if(i + 1 == argc) {
+				std::cerr << arg_str << " needs an argument\n";
+				return 1;
+			}
+			(arg_str == "--bridge" ? bridge_address : restore_path) = argv[++i];
+			continue;
+		}
+#endif
+#ifdef __EMSCRIPTEN__
+		if(arg_str == "--size" && i + 1 < argc) {
+			int w, h;
+			if(SDL_sscanf(argv[++i], "%d,%d", &w, &h) == 2) {
+				if(w * y < System::default_width * System::default_height) {
+					System::width = w;
+					System::height = h;
+				}
+			}
+			continue;
+		}
+#else
+		if(arg_str == "--panel" || arg_str == "--size") {
+			const bool panel_option = arg_str == "--panel";
+			if(i + 1 == argc || !parse_panel_size(argv[++i], panel_option ? 'x' : ',')) {
+				std::cerr << arg_str << " needs " << (panel_option ? "WxH" : "w,h")
+				          << " (panel must fit " << System::lores_width << 'x' << System::lores_height
+				          << " lores; maximum " << System::max_panel_dimension << " per side)\n";
+				return 1;
+			}
+			continue;
+		}
+#endif
 		if(arg_str == "--connect" && i + 1 < argc) {
 			mp_mode = Multiplayer::Mode::Connect;
 			mp_address = std::string(argv[i + 1]);
@@ -173,15 +252,6 @@ int main(int argc, char *argv[]) {
 			mp_mode = Multiplayer::Mode::Listen;
 		else if(arg_str == "--position") {
 			SDL_sscanf(argv[i+1], "%d,%d", &x, &y);
-		}	else if(arg_str == "--size" && i + 1 < argc) {
-      int w, h;
-			if(SDL_sscanf(argv[i+1], "%d,%d", &w, &h) == 2) {
-        if(w * y < System::max_width * System::max_height) {
-          System::width = w;
-          System::height = h;
-        }
-      }
-      i++;
 		} else if(arg_str == "--fullscreen")
 			fullscreen = true;
     else if(arg_str == "--credits") {
@@ -217,8 +287,17 @@ int main(int argc, char *argv[]) {
 			std::cout << " --connect <addr>     -- Connect to a listening game instance." << std::endl;
 			std::cout << " --listen             -- Listen for incoming connections." << std::endl;
 			std::cout << " --position x,y       -- Set window position." << std::endl;
+#ifdef __EMSCRIPTEN__
       std::cout << " --size w,h           -- Set display size. (max 320x240)" << std::endl;
+#else
+			std::cout << " --panel WxH          -- Set the emulated panel size (default 480x272).\n"
+			             " --size w,h           -- Legacy spelling for --panel.\n";
+#endif
 			std::cout << " --launch_path <file> -- Emulates the file associations on the console." << std::endl;
+#ifdef BLIT_DEV_BRIDGE
+			std::cout << " --bridge 127.0.0.1:<port> -- Start the local development bridge.\n"
+			             " --restore <file>     -- Restore a snapshot after game init.\n";
+#endif
 			std::cout << " --credits            -- Print contributor credits and exit." << std::endl;
 			std::cout << " --info               -- Print metadata info and exit." << std::endl << std::endl;
 			SDL_DestroyWindow(window);
@@ -232,11 +311,16 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	Uint32 window_flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+	                     (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+#ifdef __EMSCRIPTEN__
+	window_flags |= SDL_WINDOW_OPENGL;
+#endif
 	window = SDL_CreateWindow(
 		metadata_title,
 		x, y,
 		System::width*2, System::height*2,
-		SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0)
+		window_flags
 	);
 
 	if (window == nullptr) {
@@ -245,10 +329,32 @@ int main(int argc, char *argv[]) {
 	}
 	SDL_SetWindowMinimumSize(window, System::width, System::height);
 
+#ifndef __EMSCRIPTEN__
+	blit_renderer = new Renderer(window, System::width, System::height);
+	if(!blit_renderer->ready()) {
+		std::cerr << "could not initialize panel renderer: " << SDL_GetError() << std::endl;
+		delete blit_renderer;
+		SDL_DestroyWindow(window);
+		SDL_Quit();
+		return 1;
+	}
+#endif
+
+#ifdef BLIT_DEV_BRIDGE
+	if(!sdk::dev_bridge::start(bridge_address, restore_path)) {
+		delete blit_renderer;
+		SDL_DestroyWindow(window);
+		SDL_Quit();
+		return 1;
+	}
+#endif
+
   blit_system = new System();
   blit_input = new Input(blit_system);
 	blit_multiplayer = new Multiplayer(mp_mode, mp_address);
+#ifdef __EMSCRIPTEN__
 	blit_renderer = new Renderer(window, System::width, System::height);
+#endif
 	blit_audio = new Audio();
 
 #ifdef VIDEO_CAPTURE
@@ -277,7 +383,12 @@ int main(int argc, char *argv[]) {
 	delete blit_capture;
 #endif
 
+#ifdef BLIT_DEV_BRIDGE
+	if(!blit_system->stop()) std::_Exit(1);
+	sdk::dev_bridge::stop();
+#else
 	blit_system->stop();
+#endif
 	delete blit_system;
   delete blit_input;
 	delete blit_multiplayer;
@@ -285,5 +396,9 @@ int main(int argc, char *argv[]) {
 
 	SDL_DestroyWindow(window);
 	SDL_Quit();
+#ifdef BLIT_DEV_BRIDGE
+	return bridge_exit_status;
+#else
 	return 0;
+#endif
 }

@@ -42,7 +42,7 @@
 
 #include "drm_select.hpp"
 #include "panel.hpp"
-#include "screen_fit.hpp"
+#include "graphics/screen_fit.hpp"
 
 namespace blit_linux {
 
@@ -412,7 +412,7 @@ namespace blit_linux {
      * Asks the driver once per game screen size (test-only commit) and
      * remembers the answer until the size changes.
      */
-    bool plane_scaling_for(blit::Size screen, const ScreenFit &fit) {
+    bool plane_scaling_for(blit::Size screen, const blit::ScreenFit &fit) {
       if(!scaler.available || !use_flips)
         return false;
 
@@ -532,7 +532,7 @@ namespace blit_linux {
       use_flips = false;
     }
 
-    const ScreenFit fit = fit_screen(mode_size, frame.bounds);
+    const auto fit = blit::fit_screen(mode_size, frame.bounds);
     const bool plane_scaled = plane_scaling_for(frame.bounds, fit);
     Buffer &buffer = buffers[back];
 
@@ -544,7 +544,7 @@ namespace blit_linux {
     }
 
     // for the display engine: 1x in the top-left corner; otherwise scaled and placed on the CPU
-    present_frame(buffer.panel, pixel_format.panel, frame, plane_scaled ? ScreenFit{1, 0, 0} : fit);
+    present_frame(buffer.panel, pixel_format.panel, frame, plane_scaled ? blit::ScreenFit{1, 0, 0} : fit);
 
     if(use_flips) {
       bool queued;

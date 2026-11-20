@@ -125,7 +125,7 @@ namespace blit_linux {
       last_screen_size = frame.bounds;
     }
 
-    present_frame(panel, panel_format, frame, fit_screen(panel.size, frame.bounds));
+    present_frame(panel, panel_format, frame, blit::fit_screen(panel.size, frame.bounds));
   }
 
   void fb_shutdown() {

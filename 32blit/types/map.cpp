@@ -1,9 +1,125 @@
 /*! \file mat.cpp
 */
 #include <algorithm>
+#include <cstring>
+#include <limits>
+#include <utility>
 #include "map.hpp"
 
 namespace blit {
+  namespace {
+    uint16_t read_le16(const uint8_t *data) {
+      return uint16_t(data[0]) | (uint16_t(data[1]) << 8);
+    }
+
+    bool valid_utf8(const uint8_t *data, std::size_t size) {
+      while (size != 0) {
+        const uint8_t first = *data++;
+        --size;
+        if (first < 0x80)
+          continue;
+        if (first < 0xc2 || first > 0xf4)
+          return false;
+
+        const std::size_t count = first < 0xe0 ? 1 : first < 0xf0 ? 2 : 3;
+        if (size < count)
+          return false;
+        // Exclude overlong sequences, surrogates, and values above U+10FFFF.
+        if ((first == 0xe0 && data[0] < 0xa0) ||
+            (first == 0xed && data[0] >= 0xa0) ||
+            (first == 0xf0 && data[0] < 0x90) ||
+            (first == 0xf4 && data[0] >= 0x90))
+          return false;
+        for (std::size_t i = 0; i < count; ++i) {
+          if ((data[i] & 0xc0) != 0x80)
+            return false;
+        }
+        data += count;
+        size -= count;
+      }
+      return true;
+    }
+  }
+
+  std::unique_ptr<Map> load_tiled_map(const uint8_t *data, std::size_t size) {
+    constexpr std::size_t header_size = 12;
+    if (!data || size < header_size || std::memcmp(data, "BTMP", 4) != 0 ||
+        read_le16(data + 4) != 1)
+      return nullptr;
+
+    const uint16_t width = read_le16(data + 6);
+    const uint16_t height = read_le16(data + 8);
+    const uint16_t layer_count = read_le16(data + 10);
+    // Map multiplies the dimensions and computes tile indices in signed arithmetic.
+    if (!width || !height || !layer_count ||
+        width > std::numeric_limits<int32_t>::max() / height)
+      return nullptr;
+
+    const uint32_t area = uint32_t(width) * height;
+    data += header_size;
+    size -= header_size;
+    // Each layer needs at least a name-length byte and two complete planes.
+    const std::size_t layer_budget = size / layer_count;
+    if (!layer_budget || area > (layer_budget - 1) / 2)
+      return nullptr;
+
+    const std::size_t cells = area;
+    auto map = std::make_unique<Map>(Rect(0, 0, width, height));
+    map->layer_order.reserve(layer_count);
+    for (uint16_t i = 0; i < layer_count; ++i) {
+      if (!size)
+        return nullptr;
+      const uint8_t name_size = *data++;
+      --size;
+      if (!name_size || name_size > size || (size - name_size) / 2 < cells ||
+          std::memchr(data, 0, name_size) || !valid_utf8(data, name_size))
+        return nullptr;
+
+      std::string name(reinterpret_cast<const char *>(data), name_size);
+      data += name_size;
+      const uint8_t *transforms = data + cells;
+      const uint8_t *end = transforms + cells;
+      if (std::any_of(transforms, end, [](uint8_t value) { return value > 7; }))
+        return nullptr;
+
+      auto [it, inserted] = map->layers.try_emplace(name);
+      if (!inserted)
+        return nullptr;
+      auto &layer = it->second;
+      layer.map = map.get();
+      layer.name = name;
+      layer.tiles.assign(data, transforms);
+      layer.transforms.assign(transforms, end);
+      map->layer_order.push_back(std::move(name));
+      data = end;
+      size -= name_size + 2 * cells;
+    }
+    if (size != 0)
+      return nullptr;
+    return map;
+  }
+
+  std::string_view tiled_map_path(std::string_view generated_scene) {
+    const auto first_break = generated_scene.find('\n');
+    if (first_break == std::string_view::npos)
+      return {};
+
+    auto without_cr = [](std::string_view line) {
+      if (!line.empty() && line.back() == '\r')
+        line.remove_suffix(1);
+      return line;
+    };
+    if (without_cr(generated_scene.substr(0, first_break)) != "scene 1 Tiled")
+      return {};
+
+    generated_scene.remove_prefix(first_break + 1);
+    const auto marker = without_cr(generated_scene.substr(0, generated_scene.find('\n')));
+    constexpr std::string_view prefix = "# blit-map ";
+    if (marker.substr(0, prefix.size()) != prefix)
+      return {};
+    return marker.substr(prefix.size());
+  }
+
 
   void Map::add_layer(std::string name, std::vector<uint8_t> tiles) {
     MapLayer &layer = layers[name];

@@ -91,8 +91,14 @@ Input::~Input() {
 
 bool Input::handle_mouse(int button, bool state, int x, int y) {
 
+#ifdef __EMSCRIPTEN__
   int half_w = target->mode() ? target->width / 2 : target->width / 4;
   int half_h = target->mode() ? target->height / 2 : target->height / 4;
+#else
+  // SDL delivers mouse events in the renderer's logical panel coordinates.
+  int half_w = target->width / 2;
+  int half_h = target->height / 2;
+#endif
 
 	if (button == SDL_BUTTON_LEFT) {
 		if (state) {
