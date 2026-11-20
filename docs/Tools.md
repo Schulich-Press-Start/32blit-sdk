@@ -5,7 +5,7 @@ The individual asset tools have been deprecated in favour of https://github.com/
 You can install these tools with `pip`:
 
 ```
-pip3 install 32blit
+pip3 install 32blit construct "bitstring<5"
 ```
 
 Head on over to https://github.com/32blit/32blit-tools for further documentation covering the installation of the new tools.

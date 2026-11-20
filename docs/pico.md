@@ -60,7 +60,7 @@ libsdl2-dev libsdl2-image-dev libsdl2-net-dev unzip
 And the 32blit tools:
 
 ```
-pip3 install 32blit
+pip3 install 32blit construct "bitstring<5"
 ```
 
 If pip gives you warnings about 32blit being installed in a directory not on PATH, make sure you add it, eg:
