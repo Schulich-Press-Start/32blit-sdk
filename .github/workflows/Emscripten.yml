@@ -30,7 +30,8 @@ jobs:
     - name: Install deps
       run: |
         sudo apt update && sudo apt install doxygen graphviz pipx
-        pipx install 32blit
+        # 32blit tools 0.7.4 import ConstBitStream, which bitstring 5 removed
+        pipx install 32blit --pip-args '"bitstring<5"'
 
     - name: Setup cache
       id: cache-system-libraries

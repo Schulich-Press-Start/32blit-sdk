@@ -22,7 +22,8 @@ jobs:
       shell: bash
       run: |
         ci/install_sdl_vs.sh
-        python -m pip install 32blit
+        # 32blit tools 0.7.4 import ConstBitStream, which bitstring 5 removed
+        python -m pip install 32blit "bitstring<5"
 
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v2

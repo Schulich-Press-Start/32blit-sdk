@@ -25,11 +25,11 @@ if (NOT DEFINED BLIT_ONCE)
 	get_filename_component(PYTHON_USER_EXECUTABLE "${Python_EXECUTABLE}" NAME)
 
 	if(${VERSION_STATUS})
-		message(FATAL_ERROR "32Blit tools not found!\nInstall with: ${PYTHON_USER_EXECUTABLE} -m pip install 32blit\n")
+		message(FATAL_ERROR "32Blit tools not found!\nInstall with: ${PYTHON_USER_EXECUTABLE} -m pip install 32blit \"bitstring<5\"\n")
 	endif()
 
 	if("${TOOLS_VERSION}" VERSION_LESS "${BLIT_MINIMUM_TOOLS_VERSION}")
-		message(FATAL_ERROR "32Blit tools out of date!\nYou have ${TOOLS_VERSION}, we need >= ${BLIT_MINIMUM_TOOLS_VERSION}\nUpdate with: ${PYTHON_USER_EXECUTABLE} -m pip install --upgrade 32blit\n")
+		message(FATAL_ERROR "32Blit tools out of date!\nYou have ${TOOLS_VERSION}, we need >= ${BLIT_MINIMUM_TOOLS_VERSION}\nUpdate with: ${PYTHON_USER_EXECUTABLE} -m pip install --upgrade 32blit \"bitstring<5\"\n")
 	endif()
 
 	if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -135,6 +135,15 @@ if (NOT DEFINED BLIT_ONCE)
 		set(FLASH_PORT "AUTO" CACHE STRING "Port to use for flash")
 
 		include(${CMAKE_CURRENT_LIST_DIR}/32blit-stm32/executable.cmake)
+	elseif(32BLIT_LINUX)
+		# Unit tests for the port (PC builds only). Enabled here, in the top-level
+		# directory, because ctest only finds tests when the top level enables testing.
+		option(BLIT_LINUX_TESTS "Build the 32blit-linux unit tests" OFF)
+		if(BLIT_LINUX_TESTS)
+			enable_testing()
+		endif()
+
+		add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/32blit-linux 32blit-linux)
 	elseif(PICO_SDK_PATH)
 		include(${CMAKE_CURRENT_LIST_DIR}/32blit-pico/executable.cmake)
 	else()
