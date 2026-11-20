@@ -36,6 +36,10 @@ The `32blit-sdl` directory contains an SDL2 HAL for 32blit compatible with Linux
 
 You should be careful relying upon it, however, since `32blit-sdl` is *not an emulator* you may run into memory or performance problems when deploying your game to a 32blit console.
 
+Native SDL uses a 480×272 panel by default. Run with `--panel 640x480` to emulate a different panel (`--size 640,480` is the legacy spelling); the panel must be at least 160×120 and at most 4096 pixels per side. The default game screen is still 160×120 in lores or 320×240 in hires. A game can request explicit bounds from 96×96 up to the panel size. The screen is centered at the largest whole-number scale that fits, with black borders. Changing the window size does not change the emulated panel or the game screen.
+
+Native SDL also warns when game updates and rendering together exceed 16.6 ms for a frame, at most once per second. These panel and timing changes do not affect Emscripten builds.
+
 ## 32blit-stm32
 
 The `32blit-stm32` directory contains the STM32 HAL for 32blit, compatible with the STM32H750. Once you're ready to get your project running on a 32blit console you will need to ensure you have the `gcc-arm-none-eabi` toolchain installed and then follow the instructions below for [Building & Running On 32Blit](docs/32blit.md)

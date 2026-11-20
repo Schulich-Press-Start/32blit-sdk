@@ -7,6 +7,8 @@
 #include "drm_select.hpp"
 
 namespace {
+  using blit::fit_screen;
+  using blit::ScreenFit;
   using namespace blit_linux;
 
   DrmMode mode(int w, int h, bool preferred = false) {

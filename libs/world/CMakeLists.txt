@@ -18,7 +18,11 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
 endif()
 
 add_library(BlitWorld STATIC
+	actions.cpp
 	registry.cpp
+	scene.cpp
+	scene_world.cpp
+	world.cpp
 )
 
 target_include_directories(BlitWorld PUBLIC ${CMAKE_CURRENT_LIST_DIR})

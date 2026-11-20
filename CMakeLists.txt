@@ -13,10 +13,6 @@ endif()
 
 find_package (32BLIT CONFIG REQUIRED PATHS .)
 
-# Optional SDK libraries, usable from game code with or without an editor.
-option(BLIT_WORLD_TESTS "Build the unit tests for the SDK world library" OFF)
-add_subdirectory(libs/world)
-
 add_subdirectory(launcher-shared)
 
 add_subdirectory(utilities)

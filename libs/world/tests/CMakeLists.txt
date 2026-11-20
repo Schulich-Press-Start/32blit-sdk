@@ -17,8 +17,12 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 add_executable(blit_world_tests
+	actions_test.cpp
 	registry_test.cpp
+	scene_test.cpp
+	tile_props_test.cpp
 	value_test.cpp
+	world_test.cpp
 )
 target_link_libraries(blit_world_tests PRIVATE BlitWorld GTest::gtest_main)
 
@@ -29,4 +33,4 @@ gtest_discover_tests(blit_world_tests DISCOVERY_MODE PRE_TEST NO_PRETTY_VALUES)
 # delete, which has to account for every allocation in the binary.
 add_executable(blit_world_alloc_check no_allocation_check.cpp)
 target_link_libraries(blit_world_alloc_check PRIVATE BlitWorld)
-add_test(NAME NoAllocation.LookupAndValueConversion COMMAND blit_world_alloc_check)
+add_test(NAME NoAllocation.RuntimeWorldOperations COMMAND blit_world_alloc_check)

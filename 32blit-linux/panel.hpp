@@ -17,7 +17,7 @@
 
 #include "engine/api_private.hpp"
 
-#include "screen_fit.hpp"
+#include "graphics/screen_fit.hpp"
 
 namespace blit_linux {
 
@@ -71,5 +71,5 @@ namespace blit_linux {
    * \param frame  The game's screen: data, bounds, format (`RGB`, `RGB565` or `P`) and palette (for `P`).
    * \param fit    Scale and position, normally from fit_screen().
    */
-  void present_frame(const PanelBuffer &panel, const PanelFormat &format, const blit::SurfaceInfo &frame, const ScreenFit &fit);
+  void present_frame(const PanelBuffer &panel, const PanelFormat &format, const blit::SurfaceInfo &frame, const blit::ScreenFit &fit);
 }

@@ -7,22 +7,11 @@
 
 namespace {
 
-  struct Transform {
-    float x, y, rotation;
-  };
-  SDK_COMPONENT(Transform, x, y, rotation);
-
   struct Health {
     int32_t current, max;
     bool invulnerable;
   };
   SDK_COMPONENT(Health, current, max, invulnerable);
-
-  // one field, and a string field, which is char[sdk::string_field_size]
-  struct Name {
-    char value[sdk::string_field_size];
-  };
-  SDK_COMPONENT(Name, value);
 
   // the most fields SDK_COMPONENT accepts, to cover the end of its expansion
   struct Wide {
@@ -30,13 +19,6 @@ namespace {
   };
   SDK_COMPONENT(Wide, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16);
 
-  const sdk::FieldInfo *field(const sdk::ComponentInfo *c, const char *name) {
-    for(uint8_t i = 0; i < c->field_count; i++) {
-      if(std::string(c->fields[i].name) == name)
-        return &c->fields[i];
-    }
-    return nullptr;
-  }
 }
 
 TEST(Registry, FindsComponentByName) {
@@ -44,7 +26,7 @@ TEST(Registry, FindsComponentByName) {
 
   ASSERT_NE(transform, nullptr);
   EXPECT_STREQ(transform->name, "Transform");
-  EXPECT_EQ(transform->size, sizeof(Transform));
+  EXPECT_EQ(transform->size, sizeof(sdk::Transform));
   EXPECT_EQ(transform->field_count, 3);
 }
 
@@ -58,21 +40,25 @@ TEST(Registry, RecordsFieldNamesTypesAndOffsets) {
   auto transform = sdk::find_component("Transform");
   ASSERT_NE(transform, nullptr);
 
-  auto y = field(transform, "y");
+  auto y = sdk::find_field(*transform, "y");
   ASSERT_NE(y, nullptr);
   EXPECT_EQ(y->type, sdk::FieldType::Float);
-  EXPECT_EQ(y->offset, offsetof(Transform, y));
+  EXPECT_EQ(y->offset, offsetof(sdk::Transform, y));
 
   auto health = sdk::find_component("Health");
   ASSERT_NE(health, nullptr);
-  EXPECT_EQ(field(health, "current")->type, sdk::FieldType::Int32);
-  EXPECT_EQ(field(health, "invulnerable")->type, sdk::FieldType::Bool);
-  EXPECT_EQ(field(health, "invulnerable")->offset, offsetof(Health, invulnerable));
+  auto current = sdk::find_field(*health, "current");
+  auto invulnerable = sdk::find_field(*health, "invulnerable");
+  ASSERT_NE(current, nullptr);
+  ASSERT_NE(invulnerable, nullptr);
+  EXPECT_EQ(current->type, sdk::FieldType::Int32);
+  EXPECT_EQ(invulnerable->type, sdk::FieldType::Bool);
+  EXPECT_EQ(invulnerable->offset, offsetof(Health, invulnerable));
 }
 
 TEST(Registry, OffsetsReachTheRightMember) {
-  Transform t{1.0f, 2.0f, 3.0f};
-  auto rotation = field(sdk::find_component("Transform"), "rotation");
+  sdk::Transform t{1.0f, 2.0f, 3.0f};
+  auto rotation = sdk::find_field(*sdk::component_info<sdk::Transform>(), "rotation");
   ASSERT_NE(rotation, nullptr);
 
   // what a tool does: walk to the field with only the registry to go on

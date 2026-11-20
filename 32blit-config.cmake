@@ -43,6 +43,15 @@ if (NOT DEFINED BLIT_ONCE)
 	add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/3rd-party 3rd-party)
 	add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/32blit 32blit)
 
+	option(BLIT_WORLD_TESTS "Build the unit tests for the SDK world library" OFF)
+	if(BLIT_WORLD_TESTS)
+		enable_testing()
+		add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/libs/world libs/world)
+	else()
+		add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/libs/world libs/world EXCLUDE_FROM_ALL)
+	endif()
+	include("${CMAKE_CURRENT_LIST_DIR}/tools/blit-tools/Tiled.cmake")
+
 	function (blit_assets_yaml TARGET FILE)
 		# cause cmake to reconfigure whenever the asset list changes
 		set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${FILE})

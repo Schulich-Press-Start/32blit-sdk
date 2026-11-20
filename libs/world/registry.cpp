@@ -12,6 +12,8 @@
 #include <cstring>
 
 namespace sdk {
+  SDK_COMPONENT(Name, value);
+  SDK_COMPONENT(Transform, x, y, rotation);
 
   namespace {
     const ComponentInfo *registry[max_components];
@@ -108,6 +110,8 @@ namespace sdk {
         memset(chars + length, 0, string_field_size - length);
         return true;
       }
+
+      case FieldType::Entity: return false; // needs a scene's key-to-entity mapping
     }
 
     return false;
@@ -136,6 +140,8 @@ namespace sdk {
         const auto length = static_cast<int>(strnlen(chars, string_field_size));
         return copy_text(chars, length, buf, cap);
       }
+
+      case FieldType::Entity: return -1;
     }
 
     return -1;
@@ -148,6 +154,7 @@ namespace sdk {
       case FieldType::UInt32: return "uint32";
       case FieldType::Float:  return "float";
       case FieldType::String: return "string";
+      case FieldType::Entity: return "entity";
     }
 
     return "?";
@@ -156,13 +163,15 @@ namespace sdk {
   namespace detail {
 
     ComponentRegistrar::ComponentRegistrar(const char *name, uint16_t size,
-                                           const FieldInfo *fields, uint8_t field_count)
+                                           const FieldInfo *fields, uint8_t field_count,
+                                           const ComponentInfo *&type_info)
       : info{name, registry_count, size, fields, field_count} {
 
       if(registry_count == max_components)
         return;  // over the limit: reported by find_component failing, not by crashing here
 
       registry[registry_count++] = &info;
+      type_info = &info;
     }
   }
 
@@ -180,6 +189,14 @@ namespace sdk {
 
   const ComponentInfo *component_by_id(uint16_t id) {
     return id < registry_count ? registry[id] : nullptr;
+  }
+
+  const FieldInfo *find_field(const ComponentInfo &component, const char *name) {
+    if(name)
+      for(uint8_t i = 0; i < component.field_count; ++i)
+        if(strcmp(component.fields[i].name, name) == 0)
+          return &component.fields[i];
+    return nullptr;
   }
 
   uint16_t component_count() {
