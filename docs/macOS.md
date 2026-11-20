@@ -41,11 +41,10 @@ brew install freetype
 
 Then install 32blit tools itself.
 
+```shell
+pip3 install 32blit construct "bitstring<5"
 ```
-pip3 install 32blit
-```
-
-TODO: Document install of `construct` and `bitstring` for Python 3 (probably need a requirements.txt for the tools directory)
+Note: bitstring 5 removed `ConstBitStream` which 32blit tools requires.
 
 
 ####  Verifying install
