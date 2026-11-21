@@ -1,6 +1,7 @@
 #include "scene_preview.hpp"
 #include "builtin_defaults.hpp"
 #include "project.hpp"
+#include "../libs/world/tileset_descriptor.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -524,11 +525,11 @@ namespace editor {
     }
     if(ImGui::BeginPopup("Viewport options")) {
       ImGui::Checkbox("Grid", &show_grid_);
-      if(!map_only_) ImGui::Checkbox("Snap", &snap_);
-      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5);
-      if(ImGui::InputInt("Grid px", &grid_size_, 0, 0)) grid_size_ = std::clamp(grid_size_, 1, 512);
-      ImGui::SetItemTooltip("World pixel spacing for the grid and entity snapping. Tile cells stay 8 x 8.");
       if(!map_only_) {
+        ImGui::Checkbox("Snap", &snap_);
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5);
+        if(ImGui::InputInt("Grid px", &grid_size_, 0, 0)) grid_size_ = std::clamp(grid_size_, 1, 512);
+        ImGui::SetItemTooltip("Entity grid and snapping in world pixels. In Paint mode the grid follows the tileset.");
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10);
         ImGui::InputInt2("Game width / height", screen_draft_);
         if(ImGui::Button("Apply Game Size")) {
@@ -630,6 +631,7 @@ namespace editor {
 
     fs::path atlas;
     std::string transparent;
+    int tile_size = blit::default_tile_size;
     try {
       auto sidecar = map_->path;
       sidecar += ".json";
@@ -642,17 +644,19 @@ namespace editor {
          !read_text(scene_path(project.root(), relative), text))
         throw std::runtime_error("Cannot read tileset descriptor: " + relative);
       map_->tileset = fs::u8path(relative).lexically_normal().generic_u8string();
-      const auto tileset = nlohmann::json::parse(text);
-      const auto image = tileset.at("image").get<std::string>();
-      atlas = scene_path(project.root(), image);
-      if(atlas.empty()) throw std::runtime_error("Cannot read tileset image: " + image);
-      transparent = tileset.value("transparent", std::string{});
+      sdk::TilesetDescriptor tileset;
+      if(const auto error = sdk::read_tileset_descriptor(nlohmann::json::parse(text), tileset))
+        throw std::runtime_error(error);
+      tile_size = tileset.tile_size;
+      atlas = scene_path(project.root(), tileset.image);
+      if(atlas.empty()) throw std::runtime_error("Cannot read tileset image: " + tileset.image);
+      transparent = std::move(tileset.transparent);
     } catch(const std::exception &error) {
       map_->metadata_error = "Map tileset: " + std::string(error.what());
       atlas.clear();
     }
     maps_.retire_atlas(tiles());
-    tiles().load(renderer_, path, atlas, transparent);
+    tiles().load(renderer_, path, atlas, transparent, tile_size);
     if(map_->brush > tiles().tile_count()) map_->brush = -1;
   }
 
@@ -685,8 +689,10 @@ namespace editor {
 
   void ScenePreview::paint_cell(double x, double y) {
     auto *map = tiles().map();
-    if(!map || paint_problem() || x < 0 || y < 0 || x >= map->bounds.w * 8 || y >= map->bounds.h * 8) return;
-    const auto cell = static_cast<size_t>(y / 8) * map->bounds.w + static_cast<size_t>(x / 8);
+    if(!map || paint_problem()) return;
+    const auto world = map->pixel_size();
+    if(x < 0 || y < 0 || x >= world.w || y >= world.h) return;
+    const auto cell = static_cast<size_t>(map->tile_index(map->cell_at({static_cast<int>(x), static_cast<int>(y)})));
     auto &layer = map->layers.at(map->layer_order[map_->layer]);
     const auto tile = static_cast<uint8_t>(map_->brush);
     if(layer.tiles[cell] == tile && !layer.transforms[cell]) return;

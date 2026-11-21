@@ -19,7 +19,7 @@ namespace editor {
   namespace {
     namespace fs = std::filesystem;
     using Json = nlohmann::json;
-    constexpr int cell = 8, columns = 16, max_id = sdk::TilesetDescriptor::tile_id_count - 1;
+    constexpr int max_id = sdk::TilesetDescriptor::tile_id_count - 1;
     constexpr std::string_view descriptor_suffix = ".tileset.json";
 
     fs::path relative_path(std::string_view name) {
@@ -70,7 +70,15 @@ namespace editor {
       return bytes;
     }
 
-    int tile_count(const PreviewImage &image) { return std::min(max_id, columns * (image.height / cell)); }
+    int tile_count(const PreviewImage &image, int size) {
+      return blit::atlas_tile_count(image.width, image.height, size);
+    }
+
+    int check_atlas(const PreviewImage &image, int size) {
+      const int count = tile_count(image, size);
+      if(!count) throw std::runtime_error("Atlas must contain at most 256 whole square cells of the selected size (IDs 1–255).");
+      return count;
+    }
 
     void check_atlas_properties(const sdk::TilesetDescriptor &descriptor, int count) {
       if(count == max_id) return;
@@ -79,13 +87,12 @@ namespace editor {
           throw std::runtime_error("Atlas does not contain all tiles with properties.");
     }
 
-    PreviewImage load_preview(SDL_Renderer *renderer, const fs::path &path, std::string_view transparent = {}) {
+    PreviewImage load_preview(SDL_Renderer *renderer, const fs::path &path, int size, std::string_view transparent = {}) {
       if(!is_png(path)) throw std::runtime_error("The tileset image must be a PNG.");
       PreviewImage image;
       const auto error = image.load_png(renderer, read_asset<std::vector<uint8_t>>(path), transparent);
       if(!error.empty()) throw std::runtime_error(error);
-      if(image.width != columns * cell || image.height % cell || image.height > 16 * cell)
-        throw std::runtime_error("Expected 8 x 8 cells in 16 columns (128 px wide, 8–128 px tall). The final cell of a 256-cell atlas is not addressable.");
+      check_atlas(image, size);
       return image;
     }
 
@@ -125,8 +132,8 @@ namespace editor {
   }
 
   void TilesetAssets::load(const std::string &path, Tab &tab) {
+    Tab loaded;
     try {
-      Tab loaded;
       loaded.original = read_asset<std::string>(project_path(root_, fs::u8path(path)));
       if(const auto error = sdk::read_tileset_descriptor(Json::parse(loaded.original), loaded.descriptor))
         throw std::runtime_error(error);
@@ -134,12 +141,23 @@ namespace editor {
       loaded.descriptor.image = image.generic_u8string();
       const auto &transparent = loaded.descriptor.transparent;
       if(transparent.find('\0') != transparent.npos) throw std::runtime_error("Invalid image transparency color.");
-      loaded.preview = load_preview(renderer_, project_path(root_, image), transparent);
+      loaded.tile_size_draft = loaded.descriptor.tile_size;
+      loaded.preview = load_preview(renderer_, project_path(root_, image), loaded.descriptor.tile_size, transparent);
       std::copy(transparent.begin(), transparent.end(), loaded.transparent.begin());
-      check_atlas_properties(loaded.descriptor, tile_count(loaded.preview));
+      check_atlas_properties(loaded.descriptor, tile_count(loaded.preview, loaded.descriptor.tile_size));
       loaded.loaded = true;
       tab = std::move(loaded);
-    } catch(const std::exception &error) { tab.error = error.what(); }
+    } catch(const std::exception &error) {
+      if(!tab.loaded) tab.descriptor.image = std::move(loaded.descriptor.image);
+      tab.error = error.what();
+    }
+  }
+
+  bool TilesetAssets::uses_file(const std::function<bool(std::string_view)> &matches) const {
+    return std::any_of(tabs_.begin(), tabs_.end(), [&](const auto &entry) {
+      const auto &[path, tab] = entry;
+      return matches(path) || (!tab.descriptor.image.empty() && matches(tab.descriptor.image));
+    });
   }
 
   bool TilesetAssets::dirty() const {
@@ -156,7 +174,7 @@ namespace editor {
       const int selected = tab->second.selected_tile;
       load(path, tab->second);
       if(!tab->second.dirty) {
-        tab->second.selected_tile = std::min(selected, tile_count(tab->second.preview));
+        tab->second.selected_tile = std::min(selected, tile_count(tab->second.preview, tab->second.descriptor.tile_size));
         refresh_pending_ = true;
       }
     }
@@ -168,14 +186,16 @@ namespace editor {
   }
 
   void TilesetAssets::save(const std::string &path, Tab &tab) {
+    const int previous_size = tab.descriptor.tile_size;
     try {
       Json json = Json::parse(tab.original);
       const std::string_view transparent(tab.transparent.data());
       PreviewImage preview;
       if(json.value("transparent", std::string{}) != transparent)
-        preview = load_preview(renderer_, project_path(root_, fs::u8path(tab.descriptor.image)), transparent);
-      const int count = tile_count(preview.texture ? preview : tab.preview);
+        preview = load_preview(renderer_, project_path(root_, fs::u8path(tab.descriptor.image)), tab.tile_size_draft, transparent);
+      const int count = check_atlas(preview.texture ? preview : tab.preview, tab.tile_size_draft);
       check_atlas_properties(tab.descriptor, count);
+      tab.descriptor.tile_size = tab.tile_size_draft;
       tab.descriptor.transparent = transparent;
       sdk::write_tileset_descriptor(json, tab.descriptor);
       auto text = json.dump(2) + '\n';
@@ -187,6 +207,7 @@ namespace editor {
       tab.error.clear();
       refresh_pending_ = true;
     } catch(const std::exception &error) {
+      tab.descriptor.tile_size = previous_size;
       tab.error = error.what();
     }
   }
@@ -211,6 +232,7 @@ namespace editor {
     if(ImGui::BeginTabBar("Tileset assets")) {
       if(ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing)) {
         import_source_ = import_descriptor_ = import_image_ = {};
+        import_tile_size_ = blit::default_tile_size;
         import_error_.clear();
         project_pngs_ = list_pngs();
         if(project_pngs_.size() == 1) choose_png(project_pngs_.front());
@@ -268,14 +290,15 @@ namespace editor {
       if(brush == 0) ImGui::PopStyleColor();
       if(erase) select_brush(0);
     } else ImGui::TextUnformatted("Editing tile properties only (not the active map's tileset).");
-    if(matches_map && brush > 0 && brush <= tile_count(tab.preview)) tab.selected_tile = brush;
+    const int cell = tab.descriptor.tile_size, columns = tab.preview.width / cell;
+    const int count = tile_count(tab.preview, cell);
+    if(matches_map && brush > 0 && brush <= count) tab.selected_tile = brush;
 
     const auto &style = ImGui::GetStyle();
     const float size = ImGui::GetFontSize() * 1.5f;
     const float stride = size + 2 * style.FramePadding.x + style.ItemSpacing.x;
     const int wrap = std::max(1, int((ImGui::GetContentRegionAvail().x + style.ItemSpacing.x) / stride));
     const auto texture = reinterpret_cast<ImTextureID>(tab.preview.texture.get());
-    const int count = tile_count(tab.preview);
     for(int i = 0; i < count; ++i) {
       if(i % wrap) ImGui::SameLine();
       const int x = i % columns * cell, y = i / columns * cell;
@@ -301,6 +324,12 @@ namespace editor {
     if(ImGui::SmallButton("Settings")) ImGui::OpenPopup("Tileset Settings");
     ImGui::SetItemTooltip("Tileset Settings");
     if(ImGui::BeginPopup("Tileset Settings")) {
+      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
+      if(ImGui::InputInt("Tile size (px)", &tab.tile_size_draft, 0)) {
+        tab.dirty = true;
+        tab.error.clear();
+      }
+      ImGui::SetItemTooltip("Square cell edge length. The atlas and associated maps update after saving.");
       ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
       if(ImGui::InputText("Transparent RGB (optional)", tab.transparent.data(), tab.transparent.size(), ImGuiInputTextFlags_CharsHexadecimal)) {
         tab.dirty = true;
@@ -406,6 +435,7 @@ namespace editor {
     }
 #endif
     ImGui::InputText("Tileset file", &import_descriptor_);
+    ImGui::InputInt("Tile size (px)", &import_tile_size_, 0);
     if(fs::u8path(import_source_).is_absolute())
       ImGui::InputTextWithHint("Project PNG copy path", "Defaults to beside the tileset", &import_image_);
     ImGui::BeginDisabled(import_source_.empty() || import_descriptor_.empty());
@@ -439,9 +469,10 @@ namespace editor {
                             : relative_path(import_source_);
     const auto image_path = project_path(root_, image);
     if(!is_png(image)) throw std::runtime_error("The tileset image path must end with .png.");
-    auto preview = load_preview(renderer_, copy ? source : image_path);
+    auto preview = load_preview(renderer_, copy ? source : image_path, import_tile_size_);
     sdk::TilesetDescriptor asset;
     asset.image = image.generic_u8string();
+    asset.tile_size = import_tile_size_;
     auto json = Json::object();
     sdk::write_tileset_descriptor(json, asset);
     auto text = json.dump(2) + '\n';
@@ -458,6 +489,7 @@ namespace editor {
     auto &tab = tabs_[name];
     tab = {};
     tab.descriptor = std::move(asset);
+    tab.tile_size_draft = tab.descriptor.tile_size;
     tab.original = std::move(text);
     tab.preview = std::move(preview);
     tab.loaded = true;

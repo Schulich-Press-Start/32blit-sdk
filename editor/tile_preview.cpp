@@ -7,8 +7,6 @@
 
 namespace editor {
   namespace {
-    constexpr int tile_size = 8;
-
     std::vector<uint8_t> read_asset(const std::filesystem::path &path) {
       std::ifstream in(path, std::ios::binary | std::ios::ate);
       const auto size = in.tellg();
@@ -20,7 +18,7 @@ namespace editor {
   }
 
   void TilePreview::load(SDL_Renderer *renderer, const std::filesystem::path &map, const std::filesystem::path &atlas,
-                         std::string_view transparent) {
+                         std::string_view transparent, int tile_size) {
     error_.clear();
     atlas_ = {};
     if(!map_) {
@@ -30,6 +28,7 @@ namespace editor {
       visible_.assign(map_ ? map_->layer_order.size() : 0, 1);
     }
     if(!map_) { error_ = "Cannot read native tilemap: " + map.filename().u8string(); return; }
+    if(!map_->set_tile_size(tile_size)) { error_ = "Tile size exceeds the map's supported world dimensions."; return; }
     if(atlas.empty()) {
       error_ = "No atlas image available for the associated tileset.";
       return;
@@ -38,8 +37,8 @@ namespace editor {
     if(bytes.empty()) { error_ = "Cannot read atlas: " + atlas.filename().u8string(); return; }
     error_ = atlas_.load_png(renderer, bytes, transparent);
     if(!error_.empty()) { error_ += " Atlas: " + atlas.filename().u8string(); return; }
-    if(atlas_.width != 16 * tile_size || atlas_.height % tile_size || atlas_.height > 16 * tile_size) {
-      error_ = "Expected 8 x 8 cells in 16 columns (128 px wide, 8-128 px tall): " + atlas.filename().u8string();
+    if(!tile_count()) {
+      error_ = "Atlas must contain at most 256 whole square cells of the selected size: " + atlas.filename().u8string();
       atlas_ = {};
     }
   }
@@ -88,7 +87,8 @@ namespace editor {
     const auto pos = [&](double px, double py) {
       return ImVec2(float(center.x + (px - x) * zoom), float(center.y + (py - y) * zoom));
     };
-    const auto cell = [zoom](double offset, double camera, int limit, bool upper) {
+    const int tile_size = map_->tile_size();
+    const auto cell = [zoom, tile_size](double offset, double camera, int limit, bool upper) {
       const double tile = (camera + offset / zoom) / tile_size;
       return static_cast<int>(std::clamp(upper ? std::ceil(tile) : std::floor(tile), 0.0, double(limit)));
     };
@@ -98,7 +98,7 @@ namespace editor {
     const int last = cell(bottom.y - center.y, y, map_->bounds.h, true);
     if(left >= right || first >= last) return;
     const int columns = atlas_.width / tile_size;
-    const int tile_count = columns * (atlas_.height / tile_size);
+    const int tile_count = this->tile_count();
     const auto texture = reinterpret_cast<ImTextureID>(atlas_.texture.get());
     const float rw = 1.0f / atlas_.width, rh = 1.0f / atlas_.height;
     for(size_t i = 0; i < visible_.size(); ++i) {

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "tile_props.hpp"
+#include "../../../32blit/types/tile_geometry.hpp"
 
 TEST(TileProps, RejectsIncompatibleTablesWithoutReplacingLiveFlags) {
   sdk::TileProps props;
@@ -18,4 +19,15 @@ TEST(TileProps, RejectsIncompatibleTablesWithoutReplacingLiveFlags) {
   bytes[12] = 1;
   EXPECT_FALSE(props.load(bytes.data(), bytes.size(), 42));
   EXPECT_EQ(props.mask(255), uint32_t{1} << 31);
+}
+
+TEST(TileGeometry, CountsWholeCellsInAnyNumberOfColumns) {
+  EXPECT_EQ(blit::atlas_tile_count(45, 30, 15), 6);
+  EXPECT_EQ(blit::atlas_tile_count(255, 1, 1), 255);
+  EXPECT_EQ(blit::atlas_tile_count(128, 128, blit::default_tile_size), 255);
+  EXPECT_EQ(blit::atlas_tile_count(257, 1, 1), 0);
+  EXPECT_EQ(blit::atlas_tile_count(46, 30, 15), 0);
+  EXPECT_EQ(blit::atlas_tile_count(45, 31, 15), 0);
+  EXPECT_EQ(blit::atlas_tile_count(45, 30, 0), 0);
+  EXPECT_EQ(blit::atlas_tile_count(0, 30, 15), 0);
 }
