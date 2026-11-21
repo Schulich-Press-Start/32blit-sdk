@@ -74,3 +74,28 @@ namespace blit {
   // borrows the scene text; the caller must validate and resolve the path.
   std::string_view tiled_map_path(std::string_view generated_scene);
 }
+
+inline void blit::MapLayer::draw(Surface &dest, Surface &atlas, Rect viewport, Point destination) {
+  const int size = map->tile_size();
+  const int count = atlas_tile_count(atlas.bounds.w, atlas.bounds.h, size);
+  if(!count || viewport.empty()) return;
+  const int columns = atlas.bounds.w / size;
+  const auto clip = dest.clip;
+  dest.clip = clip.intersection({destination.x, destination.y, viewport.w, viewport.h});
+  const auto world = map->pixel_size();
+  const auto area = viewport.intersection({0, 0, world.w, world.h});
+  if(!dest.clip.empty() && !area.empty()) {
+    const auto first = map->cell_at({area.x, area.y});
+    const auto last = map->cell_at({area.x + area.w - 1, area.y + area.h - 1});
+    for(int y = first.y; y <= last.y; ++y) {
+      for(int x = first.x; x <= last.x; ++x) {
+        const Point cell(x, y);
+        const int id = tile_at(cell) - 1;
+        if(id < 0 || id >= count) continue;
+        dest.blit(&atlas, {id % columns * size, id / columns * size, size, size},
+                  {destination.x + x * size - viewport.x, destination.y + y * size - viewport.y}, transform_at(cell));
+      }
+    }
+  }
+  dest.clip = clip;
+}
