@@ -17,6 +17,7 @@
 #define NOMINMAX
 #endif
 #include <SDL_syswm.h>
+#include <shobjidl.h>
 #endif
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -269,6 +270,11 @@ namespace editor {
       bool needs_poll() const {
         return busy_ || project_.active();
       }
+#endif
+#ifdef _WIN32
+      bool take_open_project_request() { return std::exchange(open_project_requested_, false); }
+      std::optional<std::pair<std::string, bool>> take_new_project_request() { return std::exchange(new_project_request_, std::nullopt); }
+      void enable_pong_template(bool enabled) { pong_template_ = enabled; }
 #endif
 
       void invalidate_maps() {
@@ -599,6 +605,16 @@ namespace editor {
         bool save = false, save_all = false, revert = false, undo = false, redo = false;
         if(ImGui::BeginMenuBar()) {
           if(ImGui::BeginMenu("File")) {
+#ifdef _WIN32
+            if(ImGui::MenuItem("New Project...", nullptr, false, can_start && !can_save_all)) {
+              new_project_name_.clear();
+              use_pong_template_ = pong_template_;
+              show_new_project_ = true;
+            }
+            if(ImGui::MenuItem("Open Project...", nullptr, false, can_start && !can_save_all)) open_project_requested_ = true;
+            if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && (!can_start || can_save_all))
+              ImGui::SetTooltip("Save or discard your edits and stop or disconnect the game before switching projects.");
+#endif
             if(ImGui::MenuItem("Open File...", nullptr, false, project_.loaded())) {
               workspace_.show(Workspace::DocumentPanel);
               documents_.request_open();
@@ -729,6 +745,24 @@ namespace editor {
           if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
           ImGui::EndPopup();
         }
+#ifdef _WIN32
+        if(std::exchange(show_new_project_, false)) ImGui::OpenPopup("New Project");
+        if(ImGui::BeginPopupModal("New Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+          if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+          ImGui::InputText("Project name", &new_project_name_);
+          if(pong_template_) ImGui::Checkbox("Pong tutorial (art and runner only)", &use_pong_template_);
+          ImGui::TextDisabled("Create adds a new folder inside the location you choose.");
+          ImGui::BeginDisabled(new_project_name_.empty());
+          if(ImGui::Button("Create...")) {
+            new_project_request_ = {new_project_name_, use_pong_template_};
+            ImGui::CloseCurrentPopup();
+          }
+          ImGui::EndDisabled();
+          ImGui::SameLine();
+          if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+          ImGui::EndPopup();
+        }
+#endif
 #ifndef __EMSCRIPTEN__
         draw_attach_dialog(show_attach);
 #endif
@@ -1051,6 +1085,12 @@ namespace editor {
       std::vector<std::string> new_tilesets_;
       Workspace workspace_;
       ImGuiKey frame_key_ = ImGuiKey_F, pan_key_ = ImGuiMod_Shift;
+#ifdef _WIN32
+      bool open_project_requested_ = false;
+      bool pong_template_ = false, use_pong_template_ = false, show_new_project_ = false;
+      std::string new_project_name_;
+      std::optional<std::pair<std::string, bool>> new_project_request_;
+#endif
 #ifndef __EMSCRIPTEN__
       int tool_ = 0;
       bool auto_connect_ = false;
@@ -1237,35 +1277,130 @@ namespace editor {
       return 0;
     }
 #else
+#ifdef _WIN32
+    fs::path pick_project_folder(HWND owner, bool creating) {
+      if(FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)))
+        throw std::runtime_error("Could not initialize the Windows folder picker.");
+      struct Uninitialize { ~Uninitialize() { CoUninitialize(); } } uninitialize;
+      IFileOpenDialog *dialog = nullptr;
+      if(FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+        throw std::runtime_error("Could not create the Windows folder picker.");
+      const auto release = [](auto *item) { item->Release(); };
+      std::unique_ptr<IFileOpenDialog, decltype(release)> picker(dialog, release);
+      FILEOPENDIALOGOPTIONS options;
+      if(FAILED(picker->GetOptions(&options)) || FAILED(picker->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)))
+        throw std::runtime_error("Could not configure the Windows folder picker.");
+      picker->SetTitle(creating ? L"Choose where to create your project" : L"Open 32blit project folder (contains blit-project.json)");
+      const auto shown = picker->Show(owner);
+      if(shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return {};
+      IShellItem *selection = nullptr;
+      if(FAILED(shown) || FAILED(picker->GetResult(&selection))) throw std::runtime_error("Could not open the selected folder.");
+      std::unique_ptr<IShellItem, decltype(release)> item(selection, release);
+      PWSTR path = nullptr;
+      if(FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) throw std::runtime_error("Could not resolve the selected folder.");
+      std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> name(path, CoTaskMemFree);
+      return fs::path(name.get());
+    }
+
+    fs::path create_native_project(const fs::path &parent, const std::string &name, const fs::path &pong_template) {
+      if(name.empty() || name.size() > 80 || name.front() == ' ' || name.back() == ' ' || name.back() == '.' ||
+         !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+           return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_';
+         })) throw std::runtime_error("Use 1–80 letters, digits, spaces, hyphens or underscores for the project name.");
+      const auto root = parent / fs::u8path(name);
+      if(!fs::create_directory(root)) throw std::runtime_error("A folder with that project name already exists.");
+      const bool pong = !pong_template.empty();
+      const char *scene = pong ? "scenes/pong.scene" : "scenes/main.scene";
+      const auto write_text = [&](const fs::path &path, std::string_view text) {
+        write_new_file(root / path, text.data(), text.size());
+      };
+      try {
+        fs::create_directory(root / "scenes");
+        fs::create_directory(root / "assets");
+        Json manifest{{"name", name}, {"scene", scene}, {"registry", "registry.json"}};
+        if(pong) {
+          for(const auto *file : {"paddles.png", "ball.png", "court.png"})
+            fs::copy_file(pong_template / "assets" / file, root / "assets" / file);
+          fs::copy_file(pong_template / "registry.json", root / "registry.json");
+          fs::copy(pong_template / "Runtime", root / "Runtime", fs::copy_options::recursive);
+          manifest["windows"] = {{"play_exe", "Runtime/team_pong.exe"}};
+        } else {
+          auto components = Json::object();
+          for(uint16_t i = 0; i < sdk::component_count(); ++i) {
+            const auto &type = *sdk::component_by_id(i);
+            auto fields = Json::object();
+            for(uint8_t j = 0; j < type.field_count; ++j)
+              fields[type.fields[j].name] = sdk::field_type_name(type.fields[j].type);
+            components[type.name] = std::move(fields);
+          }
+          write_text("registry.json", Json{{"version", 1}, {"components", std::move(components)}}.dump(2));
+        }
+        write_text(scene, pong ? "scene 1 Pong\n" : "scene 1 main\n");
+        write_text("blit-project.json", manifest.dump(2) + '\n');
+      } catch(...) {
+        std::error_code error;
+        fs::remove_all(root, error);
+        throw;
+      }
+      return root;
+    }
+#endif
+
     int event_loop(SDL_Window *window, SDL_Renderer *renderer, const char *address, const char *project) {
 #ifdef _WIN32
       EditorDpi dpi(window);
 #endif
-      Editor editor(address, project, renderer);
+      auto editor = std::make_unique<Editor>(address, project, renderer);
+#ifdef _WIN32
+      const std::unique_ptr<char, decltype(&SDL_free)> base(SDL_GetBasePath(), SDL_free);
+      auto executable_dir = base ? fs::u8path(base.get()) : fs::path{};
+      if(!executable_dir.has_filename()) executable_dir = executable_dir.parent_path();
+      const auto pong_template = executable_dir.empty() ? fs::path{} : executable_dir.parent_path() / "Pong Reference";
+      const bool pong_available = !pong_template.empty() && fs::is_regular_file(pong_template / "Runtime/team_pong.exe");
+      editor->enable_pong_template(pong_available);
+#endif
       Uint64 redraw_until = SDL_GetTicks64() + 1000;
       for(;;) {
         const auto frame_start = SDL_GetTicks64();
         const bool visible = !(SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN));
-        const int wait = visible && (frame_start < redraw_until || editor.animate_preview()) ? 0 : 100;
+        const int wait = visible && (frame_start < redraw_until || editor->animate_preview()) ? 0 : 100;
         SDL_Event event;
         bool repaint = false;
         for(bool pending = wait ? SDL_WaitEventTimeout(&event, wait) : SDL_PollEvent(&event);
             pending; pending = SDL_PollEvent(&event)) {
           if(event.type == SDL_QUIT || (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE))
             return 0;
-          const bool input = process_editor_event(editor, event);
+          const bool input = process_editor_event(*editor, event);
           repaint |= input || event.type == SDL_RENDER_TARGETS_RESET || event.type == SDL_RENDER_DEVICE_RESET;
           if(input && (event.type != SDL_WINDOWEVENT || event.window.event != SDL_WINDOWEVENT_EXPOSED))
             redraw_until = SDL_GetTicks64() + 1000;
         }
-        const bool polling = editor.needs_poll();
-        editor.tick();
+        const bool polling = editor->needs_poll();
+        editor->tick();
         if(SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) continue;
         if(!repaint && wait && !polling && !ImGui::GetIO().WantTextInput) continue;
 #ifdef _WIN32
         dpi.refresh();
 #endif
-        if(!render_frame(renderer, editor)) return 0;
+        if(!render_frame(renderer, *editor)) return 0;
+#ifdef _WIN32
+        auto creation = editor->take_new_project_request();
+        if(creation || editor->take_open_project_request()) {
+          SDL_SysWMinfo info{};
+          SDL_VERSION(&info.version);
+          const auto owner = SDL_GetWindowWMInfo(window, &info) ? info.info.win.window : nullptr;
+          try {
+            if(auto folder = pick_project_folder(owner, creation.has_value()); !folder.empty()) {
+              if(creation) folder = create_native_project(folder, creation->first, creation->second ? pong_template : fs::path{});
+              editor = std::make_unique<Editor>(address, folder.u8string().c_str(), renderer);
+              editor->enable_pong_template(pong_available);
+            }
+          } catch(const std::exception &error) {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Could not open project", error.what(), window);
+          }
+          redraw_until = SDL_GetTicks64() + 1000;
+        }
+#endif
         const auto elapsed = SDL_GetTicks64() - frame_start;
         if(elapsed < 16) SDL_Delay(static_cast<Uint32>(16 - elapsed));
       }

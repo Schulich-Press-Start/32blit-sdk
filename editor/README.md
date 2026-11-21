@@ -34,8 +34,10 @@ Use **File → Save All**, then **Export Project ZIP**. The browser shows **Expo
 
 Pass the directory of a trusted project containing `blit-project.json`. Platformer ships an example with its desktop build and launch settings and startup scene. Have CMake on `PATH`; **Dev** also needs the installed `blit` CLI.
 
+On Windows, you can also launch the editor without arguments and choose **File → Open Project…**. Select the folder containing `blit-project.json` in the Windows folder picker. Save or discard changes and stop or disconnect the running game before switching projects.
+
 - **Play** launches `windows.play_exe` when supplied in a Windows kit; otherwise it configures and incrementally builds a fresh Debug game. No files are watched.
-- **Dev** starts `blit dev` with build-on-save and watches the startup scene and its native map for reload. Select **Build / Game Log** from the **Tools** dropdown for build and reload messages.
+- **Dev** configures the source project before starting `blit dev` with build-on-save. It watches the startup scene and its native map for reload. Select **Build / Game Log** from **Tools** for configuration, build, and reload messages. A packaged executable alone is enough for Play, not Dev.
   Select and copy text from the Console or Build / Game Log. Drag the dock divider to give the output more room.
 - **File → Reconfigure** runs the configured CMake preset without launching a game. Use a separate build folder when switching generators.
 - **Stop** ends the editor-managed session. Close any independently launched watcher before using the same build folder with **Dev**.

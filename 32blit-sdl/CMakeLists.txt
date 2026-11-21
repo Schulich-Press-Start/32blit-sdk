@@ -59,7 +59,7 @@ if(EMSCRIPTEN)
 else()
 
 	# fallback guess for SDL location on Windows
-	if(WIN32 AND NOT SDL2_DIR AND 32BLIT_DIR)
+	if(MSVC AND NOT SDL2_DIR AND 32BLIT_DIR)
 		set(SDL2_DIR "${32BLIT_DIR}/vs/sdl")
 	endif()
 

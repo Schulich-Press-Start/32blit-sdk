@@ -2,6 +2,8 @@
 
 Start with an empty game loop and build a playable Pong game one change at a time. Continue into the [scene-driven edition](#build-the-scene-driven-edition) to use prefab defaults, authored colliders, sprite clips, and a tilemap. [The completed project](../examples/team-pong/) is available separately so you can compare your work at any point. In the Windows kit it is the `team-pong` folder; **Play Pong.cmd** runs its prebuilt executable.
 
+**Want to start in the editor?** In the Windows kit, double-click **Build Pong in Editor.cmd**, then jump to [Set up Pong in the editor](#set-up-pong-in-the-editor). No compiler needed for that route.
+
 ## 0. Start with a blank window
 
 Install Visual Studio or Build Tools with **Desktop development with C++**, CMake 3.21+, and Python. Clone the SDK on the `world-storage` branch if you only have the ZIP; the ZIP includes the editor, games, and tutorial source, not the SDK toolchain. In Developer PowerShell, set `$sdk` to the full path of your SDK checkout:
@@ -22,6 +24,8 @@ cmake --build build-windows --config Debug --target pong_starter
 ```
 
 Open `pong.cpp` in your text editor. The starter has three callbacks: `init` sets a 320 × 240 display, `update` is called every 10 ms, and `render` clears the screen. **Checkpoint:** a blank navy window opens. If CMake cannot find the SDK, check that `$sdk\32blit-config.cmake` exists.
+
+The first background is not an image. `screen.pen = Pen(16, 25, 45);` picks a navy RGB color, and `screen.clear();` fills the whole window with it every frame. The scene-driven game uses the same navy fill under its tilemap, so empty cells show navy in the game even though the editor canvas is light gray.
 
 ![Blank navy window produced by the Pong starter](images/pong-blank.png)
 
@@ -196,24 +200,58 @@ cmake --preset windows "-D32BLIT_DIR=$sdk" "-DSDL2_DIR=$sdk/vs/sdl"
 cmake --build build-windows --config Debug --target team_pong
 ```
 
-Open this folder with `32blit-editor.exe --project .` (use the full path to your editor executable). The built game will not show a court until you save the required assets. Use the same game build and run commands shown below, but stay in `pong-authoring`.
+Open this folder with `32blit-editor.exe --project .` (use the full path to your editor executable). If you're using **Build Pong in Editor.cmd** from the Windows kit, skip the PowerShell setup above: that launcher opens a separate project with a blank scene, a registry, the source PNGs, and a prebuilt game. Neither route modifies the completed reference.
 
-1. **Prefabs:** Add `paddle` with `Transform2D`, `PaddleDrive`, `BoxCollider2D` (`width=10`, `height=36`, offsets `-5,-18`), and `Sprite` (`asset=assets/paddle`, `clip=pulse`, offsets `-5,-18`). Leave `PaddleDrive` unchecked to use C++ defaults. Create `player` and `opponent` from `paddle` at `(24,120)` and `(296,120)`. Set the opponent's `PaddleDrive` to `computer=true`, `speed=92`, and `Sprite.clip` to `steady`. Add `ball` at `(160,120)` with an 8 × 8 collider and `Sprite asset=assets/ball clip=spin`; both use offsets `-4,-4`. [Compare the scene file](../examples/team-pong/scenes/pong.scene).
-2. **Sprites:** Create `assets/paddle.sprite.json` from `assets/paddles.png` and `assets/ball.sprite.json` from `assets/ball.png`. In **Sheet settings**, apply 10 × 36 for the paddle; keep 8 × 8 for the ball. Select the first cell before clicking **Add clip**, then use **Append picked cell** for additional frames. All three clips loop.
+### Set up Pong in the editor
 
-   | Descriptor | Clip | Cells in order | Durations (ms) |
-   |---|---|---|---|
-   | `paddle` | `pulse` | 0, 1 | 440, 220 |
-   | `paddle` | `steady` | 0 | 440 |
-   | `ball` | `spin` | 0, 1 | 100, 100 |
+The **2D Viewport** should show `scenes/pong.scene` with no actors. **Prefabs**, **Entities**, and **Layers** are in the right dock; **Tilesets** is in the bottom dock and **Sprites** is in the main dock. If a tab is hidden, use its dock's **+** menu to open it. Drag the divider to make a cramped panel taller or wider.
 
-   The ball’s `spin` clip alternates between two frames every 100 ms. Click **Play** in **Sprites** to see it loop before launching the game. The ball’s movement and collider are separate from that animation.
+#### A. Create the sprite clips first
 
-   ![Ball spin clip with Loop enabled in the Sprites panel](images/pong-ball-clip.png)
+1. Click **Sprites**, then the **+** inside the Sprites panel. In the PNG list, select `assets/paddles.png`. Replace **Sprite file** with `assets/paddle.sprite.json` and click **Create draft**. The PNG is the input; the JSON is a new asset, not a replacement for the PNG.
+2. In the new tab, click **Sheet settings**, enter `10` and `36` in **Frame size (px)**, and click **Apply grid**. The atlas should show two tall paddle cells. Hover a cell to see its zero-based number, or enter the number in **Cell (zero-based)**.
+3. Select cell `0`. In **Named clips**, type `pulse` in **Name** and click **Add clip**. This adds the selected cell as the first frame. Select cell `1` in the atlas and click **Append picked cell** under **Frames**. In the frame list, select row 1 and set **Duration (ms)** to `440`; select row 2 and set it to `220`. Scroll the right half of the panel if the duration field is below the preview. Leave **Loop** checked and click **Play** to check that it alternates.
+4. Select cell `0` again, enter `steady` in **Name**, and click **Add clip**. Set its only frame to `440` ms. Use **File → Save Sprite** while the Sprites panel is focused.
+5. In **Sprites**, click **+** again, select `assets/ball.png`, set **Sprite file** to `assets/ball.sprite.json`, and click **Create draft**. Keep the `8 × 8` grid. Pick cell `0`, enter `spin`, and click **Add clip**. Pick cell `1` and click **Append picked cell**. Leave **Loop** checked and both durations at `100` ms. Click **Play** to see the ball alternate, then **File → Save Sprite**.
 
+![Ball spin clip in the Sprites panel](images/pong-ball-clip.png)
 
-3. **Court:** Use **Tilesets → +** to create `assets/court.tileset.json` from `assets/court.png`. In the 2D Viewport tab strip, choose **+ → New Tilemap**, name it `scenes/pong.map`, enter **40 × 30 cells**, and select the court tileset. Select its **Ground** layer, choose a brush in **Tilesets**, and paint a center line and court edges. Your court can look different from the reference; the runtime court boundaries are still fixed by `pong.cpp`.
-4. **Finish:** Choose **File → Save All** and run `./build-windows/Debug/team_pong.exe` from `pong-authoring`. Check that both paddles and the ball appear, that Z serves, and that the scene and clip edits affect the next launch without a rebuild. If a sprite is missing, check its asset stem, clip name and frame dimensions; if the court is missing, check the map's name and project working directory.
+#### B. Add a paddle prefab with defaults
+
+1. Return to **2D Viewport**. Click **Prefabs → Add Prefab**, enter `paddle` in **Key**, and click **Create**. Expand the `paddle` row to expose **Add Component**.
+2. Choose **Add Component → Transform2D** and click **Add** with all boxes unchecked. Do the same for **PaddleDrive**. Unchecked fields use the C++ defaults; you will override the opponent's values later.
+3. Choose **Add Component → Sprite**. In the **Add Sprite** popup, check each field below to reveal its input, replace the value, then click **Add**. Repeat with **BoxCollider2D**.
+
+   | Component | Fields to check and fill |
+   |---|---|
+   | `Sprite` | `asset` = `assets/paddle`; `clip` = `pulse`; `offset_x` = `-5`; `offset_y` = `-18` |
+   | `BoxCollider2D` | `width` = `10`; `height` = `36`; `offset_x` = `-5`; `offset_y` = `-18` |
+
+   Leave `.sprite.json` off the `asset` value. The offsets center both artwork and collider on the paddle's position. The prefab itself does not appear in the scene until you create instances.
+
+#### C. Place the player, opponent, and ball
+
+1. Click **Entities → Add Entity**. Enter `player` in **Key**, choose `paddle` from **Prefab**, and click **Create**. Select `player` in the list if it is not selected. Under **Transform2D**, click the **Edit** button below `x`, enter `24`, and click **Set**. Repeat for `y` with `120`. Use each field's own **Edit** button, not **Add Component** for inherited components.
+2. Repeat **Add Entity** with the key `opponent` and prefab `paddle`. Set `x` to `296` and `y` to `120`. Scroll down its inspector and use **Edit → Set** on `PaddleDrive.computer` (`true`), `PaddleDrive.speed` (`92`), and `Sprite.clip` (`steady`). These are local overrides; the player still inherits the original values.
+3. Click **Add Entity**, enter `ball`, leave **Prefab** at **None**, and click **Create**. Select `ball`. Use **Add Component** three times to add `Transform2D`, `Sprite`, and `BoxCollider2D`. On entities, each component is added immediately. Use each field's **Edit → Set** to enter:
+
+   | Component | Values |
+   |---|---|
+   | `Transform2D` | `x=160`, `y=120` |
+   | `Sprite` | `asset=assets/ball`, `clip=spin`, `offset_x=-4`, `offset_y=-4` |
+   | `BoxCollider2D` | `width=8`, `height=8`, `offset_x=-4`, `offset_y=-4` |
+
+4. Choose **File → Save All**. Click **Fit Screen** in **2D Viewport** if needed. You should see a paddle on each side and the ball in the center. Select an actor to see its orange collider outline. The viewport shows a still frame; **Sprites → Play** previews motion. [Compare the finished scene file](../examples/team-pong/scenes/pong.scene) if anything is missing.
+
+#### D. Add the court background and run the game
+
+The game supplies the flat navy background in C++. Here you create the **tilemap layer above it** for the court lines. You don't need to paint every cell navy.
+
+1. Click **Tilesets**, then the **+** inside that panel. In **Project PNG**, choose `assets/court.png`; set **Tileset file** to `assets/court.tileset.json` and **Tile size (px)** to `8`. Click **Import**. Leave tile properties empty: these tiles are decorative.
+2. Go to **2D Viewport** and click the **+ beside the `scenes/pong.scene` tab**, not the dock's +. Select **New Tilemap**. Set **Path** to `scenes/pong.map`, **Width / Height (cells)** to `40` and `30`, and **Tileset** to `assets/court.tileset.json`. Click **Create**. Matching the scene's folder and basename is what associates the map with the scene.
+3. In the map tab, click **Fit Map**. Open **Layers** and click the **Ground** name; keep its visibility checkbox checked. Go to **Tilesets** and pick a visible swatch; hover to see its tile number. In **2D Viewport**, turn **Paint** on if it is off, then click a cell to place the first tile. For example, use **Tile 4** to mark the sides of the court: counting from the top left as column 0, row 0, place a line near row 2, another near row 27, and a dash every other row near column 20. You can paint a shorter line to test first. Use **Eraser** to clear a cell. These decorations do not set the physics boundaries.
+4. Choose **File → Save All**, then switch back to `scenes/pong.scene` to see the court behind the actors. In the Windows kit, click the **Play** menu item at the very top of the editor (not the animation preview button). If you built from source, you can instead run `.\build-windows\Debug\team_pong.exe` from `pong-authoring`.
+5. Press **Z** to serve and **Up/Down** or **W/S** to move. The instructions require all three actors, both sprite descriptors, and the map with its tileset link. If the game says it cannot load the project, compare those filenames with the completed reference. After changing an asset, save, stop the running game, and play again.
 
 ![The scene-driven edition open in the editor](images/pong-editor.png)
 
@@ -252,7 +290,7 @@ Build the [desktop editor](../editor/README.md) and open the sample, or use **Ed
 .\build-editor\Release\32blit-editor.exe --project .\examples\team-pong
 ```
 
-`blit-project.json` tells the editor to open `scenes/pong.scene` and use the sample's Windows build settings. Use **File → Save All** to write your authoring changes. **Play** builds and starts a fresh Debug game; use **Stop** before starting it again to see changes made during a session. If you run the game from PowerShell instead, relaunch it after changing the scene, map, or sprite descriptors. Only changes to C++ or packed PNG artwork need a rebuild.
+`blit-project.json` selects the startup scene and launch settings. Use **File → Save All** before playing. In the kit, **Play** launches the bundled game; a source checkout configures and builds it. Use **Stop** before starting again to see saved edits. C++ and packed PNG changes require a source rebuild.
 
 ## 1. Place actors and reuse a paddle prefab
 

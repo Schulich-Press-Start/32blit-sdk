@@ -94,8 +94,6 @@ namespace editor {
     try {
       if(!dev && !play_exe_.empty()) {
         launch_play(play_exe_, "Playing (packaged game)");
-      } else if(dev && fs::is_regular_file(root_ / fs::u8path(build_) / "CMakeCache.txt")) {
-        build_or_watch();
       } else {
         configure();
       }

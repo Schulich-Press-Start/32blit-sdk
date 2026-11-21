@@ -9,6 +9,19 @@
       "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}
     },
     {
+      "name": "windows-mingw",
+      "displayName": "Windows MSYS2 UCRT64 (GCC and Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-mingw",
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows"},
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_PREFIX_PATH": "$env{MINGW_PREFIX}"
+      }
+    },
+    {
       "name": "linux",
       "displayName": "Linux desktop (system SDL)",
       "binaryDir": "${sourceDir}/build-linux",

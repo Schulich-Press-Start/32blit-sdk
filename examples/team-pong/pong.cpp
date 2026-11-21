@@ -226,7 +226,8 @@ void render(uint32_t time) {
   screen.clear();
   if (!art.court) {
     screen.pen = Pen(255, 224, 151);
-    screen.text("Start the game from the team-pong project folder.", minimal_font, Point(12, 12));
+    screen.text("Create and save the Pong scene, court and clips first.", minimal_font, Point(12, 12));
+    screen.text("Run from your project folder. See the game log for details.", minimal_font, Point(12, 23));
     return;
   }
   draw_court(*art.court);

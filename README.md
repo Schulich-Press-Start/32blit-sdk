@@ -25,6 +25,7 @@ How to set up your editor:
 * [Visual Studio Code](docs/VSCode.md)
 
 For scene authoring, prefabs, and live playtesting, see the [32blit Editor Guide](editor/README.md).
+For game-loop, component, and asset coding patterns, see [SDK coding conventions](docs/SDKConventions.md).
 
 # Overview of what is inside?
 
