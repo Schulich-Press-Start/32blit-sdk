@@ -77,8 +77,8 @@ namespace editor {
     }
 
     unsigned check_grid(const sdk::SpriteClips &descriptor, const PreviewImage &image, unsigned width, unsigned height) {
-      if(!width || !height || width % 8 || height % 8 || width > max_dimension || height > max_dimension)
-        throw std::runtime_error("Frame width and height must be multiples of 8 between 8 and 2048 pixels.");
+      if(!width || !height || width > max_dimension || height > max_dimension)
+        throw std::runtime_error("Frame width and height must be between 1 and 2048 pixels.");
       if(!image.texture || image.width % width || image.height % height)
         throw std::runtime_error("The PNG must contain a whole number of frames in both dimensions.");
       const unsigned count = (image.width / width) * (image.height / height);
@@ -204,7 +204,8 @@ namespace editor {
     Tab tab;
     tab.descriptor.image = new_image_;
     tab.preview = load_png(renderer_, root_, new_image_);
-    check_grid(tab.descriptor, tab.preview, 8, 8);
+    tab.width = tab.descriptor.frame_width = tab.preview.width % 8 ? tab.preview.width : 8;
+    tab.height = tab.descriptor.frame_height = tab.preview.height % 8 ? tab.preview.height : 8;
     tab.loaded = tab.dirty = true;
     tabs_.emplace(path, std::move(tab));
     pending_tab_ = path;
@@ -392,8 +393,8 @@ namespace editor {
       int dimensions[] = {tab.width, tab.height};
       ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
       if(ImGui::InputInt2("Frame size (px)", dimensions)) {
-        tab.width = std::clamp(dimensions[0], 8, max_dimension);
-        tab.height = std::clamp(dimensions[1], 8, max_dimension);
+        tab.width = std::clamp(dimensions[0], 1, max_dimension);
+        tab.height = std::clamp(dimensions[1], 1, max_dimension);
       }
       ImGui::SameLine();
       if(ImGui::Button("Apply grid")) {

@@ -1,3 +1,4 @@
 assets.cpp:
   assets/court.png: packed_court
-  assets/actors.png: packed_actors
+  assets/paddles.png: packed_paddles
+  assets/ball.png: packed_ball
