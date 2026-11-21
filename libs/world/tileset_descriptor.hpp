@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <nlohmann/json.hpp>
+#include "../../32blit/types/tile_geometry.hpp"
 
 namespace sdk {
   struct TilesetDescriptor {
@@ -17,6 +18,7 @@ namespace sdk {
 
     std::string image, transparent;
     Properties properties; // One-based atlas IDs. Bit 0 is reserved for empty cells.
+    int tile_size = blit::default_tile_size;
   };
 
   /// Returns an error or nullptr. An invalid descriptor does not replace the output.
@@ -28,6 +30,11 @@ namespace sdk {
 
     TilesetDescriptor descriptor;
     descriptor.image = image->get_ref<const std::string &>();
+    if(const auto size = json.find("tile_size"); size != json.end()) {
+      if(!size->is_number_integer() || *size < 1 || *size > blit::max_tile_size)
+        return "Tileset tile_size must be a positive integer no greater than 65535.";
+      descriptor.tile_size = size->get<int>();
+    }
     if(const auto transparent = json.find("transparent"); transparent != json.end()) {
       if(!transparent->is_string()) return "Tileset transparency must be a string.";
       descriptor.transparent = transparent->get_ref<const std::string &>();
@@ -81,6 +88,8 @@ namespace sdk {
     json["image"] = descriptor.image;
     if(descriptor.transparent.empty()) json.erase("transparent");
     else json["transparent"] = descriptor.transparent;
+    if(descriptor.tile_size != blit::default_tile_size || json.contains("tile_size"))
+      json["tile_size"] = descriptor.tile_size;
 
     auto definitions = Json::array();
     for(const auto &property : descriptor.properties) definitions.push_back(property.first);

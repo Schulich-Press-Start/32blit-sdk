@@ -131,8 +131,9 @@ namespace editor {
       return ImVec2(float(center.x + (x - camera_x_) * zoom_), float(center.y + (y - camera_y_) * zoom_));
     };
     const auto *map = tiles().map();
-    const int world_width = map_only_ && map ? std::max(1, map->bounds.w) * 8 : screen_size_[0];
-    const int world_height = map_only_ && map ? std::max(1, map->bounds.h) * 8 : screen_size_[1];
+    const auto map_size = map ? map->pixel_size() : blit::Size{};
+    const int world_width = map_only_ && map ? std::max(1, map_size.w) : screen_size_[0];
+    const int world_height = map_only_ && map ? std::max(1, map_size.h) : screen_size_[1];
     if(!zoom_ || frame_screen) {
       camera_x_ = world_width * .5;
       camera_y_ = world_height * .5;
@@ -192,7 +193,7 @@ namespace editor {
     const auto origin = project(0, 0);
     const auto bounds = project(world_width, world_height);
     if(show_grid_) {
-      double step = grid_size_;
+      double step = map && (map_only_ || paint_mode()) ? map->tile_size() : grid_size_;
       while(step * zoom_ < inset) step *= 2;
       const auto phase = [&](double camera, float dimension) {
         const double offset = std::fmod(camera - dimension * .5 / zoom_, step);

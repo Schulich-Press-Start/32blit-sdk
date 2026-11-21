@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace editor {
@@ -22,6 +23,7 @@ namespace editor {
     bool active_dirty() const;
     void save(bool all);
     bool dirty() const;
+    bool uses_file(const std::function<bool(std::string_view)> &matches) const;
 
   private:
     struct Tab {
@@ -31,6 +33,7 @@ namespace editor {
       std::array<char, 128> property_name{};
       PreviewImage preview;
       int selected_tile = 1;
+      int tile_size_draft = blit::default_tile_size;
       bool loaded = false, dirty = false;
     };
 
@@ -49,5 +52,6 @@ namespace editor {
     bool refresh_pending_ = false;
     std::vector<std::string> project_pngs_;
     std::string import_source_, import_descriptor_, import_image_;
+    int import_tile_size_ = blit::default_tile_size;
   };
 }

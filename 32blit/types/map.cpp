@@ -170,6 +170,22 @@ namespace blit {
     flags.resize(bounds.w * bounds.h);
   }
 
+  bool Map::set_tile_size(int size) {
+    if(!valid_tile_size(size) || bounds.w > std::numeric_limits<int32_t>::max() / size ||
+       bounds.h > std::numeric_limits<int32_t>::max() / size) return false;
+    tile_size_ = size;
+    return true;
+  }
+
+  Point Map::cell_at(Point pixel) const {
+    const auto tile = [size = tile_size_](int32_t p) { return p / size - (p % size < 0); };
+    return {tile(pixel.x), tile(pixel.y)};
+  }
+
+  Rect Map::cell_rect(Point cell) const {
+    return {cell.x * tile_size_, cell.y * tile_size_, tile_size_, tile_size_};
+  }
+
   int32_t Map::tile_index(Point p) {
     return this->bounds.contains(p) ? p.x + p.y * this->bounds.w : -1;
   }
@@ -181,21 +197,49 @@ namespace blit {
     }
   }
 
+  void MapLayer::draw(Surface &dest, Surface &atlas, Rect viewport, Point destination) {
+    const int size = map->tile_size();
+    const int count = atlas_tile_count(atlas.bounds.w, atlas.bounds.h, size);
+    if(!count || viewport.empty()) return;
+    const int columns = atlas.bounds.w / size;
+    const auto clip = dest.clip;
+    dest.clip = clip.intersection({destination.x, destination.y, viewport.w, viewport.h});
+    const auto world = map->pixel_size();
+    const auto area = viewport.intersection({0, 0, world.w, world.h});
+    if(!dest.clip.empty() && !area.empty()) {
+      const auto first = map->cell_at({area.x, area.y});
+      const auto last = map->cell_at({area.x + area.w - 1, area.y + area.h - 1});
+      for(int y = first.y; y <= last.y; ++y) {
+        for(int x = first.x; x <= last.x; ++x) {
+          const Point cell(x, y);
+          const int id = tile_at(cell) - 1;
+          if(id < 0 || id >= count) continue;
+          dest.blit(&atlas, {id % columns * size, id / columns * size, size, size},
+                    {destination.x + x * size - viewport.x, destination.y + y * size - viewport.y},
+                    transform_at(cell));
+        }
+      }
+    }
+    dest.clip = clip;
+  }
+
   void MapLayer::mipmap_texture_span(Surface *dest, Point s, uint16_t c, Surface *sprites, Vec2 swc, Vec2 ewc) {
+    if(!c) return;
+    dest->alpha = 255;
+    if(sprites->mipmaps.empty() || (map->tile_size() % 2)) {
+      texture_span(dest, s, c, sprites, swc, ewc);
+      return;
+    }
     // calculate the mipmap index to use for drawing
     float span_length = (ewc - swc).length();
     float mipmap = ((span_length / float(c)) / 2.0f);
-    uint16_t mipmap_index = floorf(mipmap);
-    uint8_t blend = (mipmap - floorf(mipmap)) * 255;
-
-    if (mipmap_index >= sprites->mipmaps.size()) {
-        mipmap_index = int32_t(sprites->mipmaps.size()) - 1 < 0 ? 0 : uint16_t(sprites->mipmaps.size() - 1);
-    }
-
-    dest->alpha = 255;
+    unsigned last = static_cast<unsigned>(std::min<std::size_t>(15, sprites->mipmaps.size() - 1));
+    while(map->tile_size() % (1 << last)) --last;
+    auto mipmap_index = static_cast<unsigned>(std::min(mipmap, float(last)));
+    const uint8_t blend = (mipmap - floorf(mipmap)) * 255;
     texture_span(dest, s, c, sprites->mipmaps[mipmap_index], swc, ewc, mipmap_index);
 
-    if (++mipmap_index < sprites->mipmaps.size()) {
+    if (++mipmap_index <= last) {
       dest->alpha = blend;
       texture_span(dest, s, c, sprites->mipmaps[mipmap_index], swc, ewc, mipmap_index);
     }
@@ -204,33 +248,33 @@ namespace blit {
   void MapLayer::texture_span(Surface *dest, Point s, uint16_t c, Surface *sprites, Vec2 swc, Vec2 ewc, uint8_t mipmap_index) {
     BlitBlendFunc bbf = dest->bbf;
 
-    int world_size = map->bounds.w * 8;
-    int tile_size = 8 >> mipmap_index;
+    const auto world = map->pixel_size();
+    const int size = map->tile_size();
+    if(!c || mipmap_index >= 16 || size % (1 << mipmap_index)) return;
+    const int tile_size = size >> mipmap_index;
+    const int count = atlas_tile_count(sprites->bounds.w, sprites->bounds.h, tile_size);
+    if(!count) return;
+    const int columns = sprites->bounds.w / tile_size;
 
     Vec2 wc = swc;
     Vec2 dwc = (ewc - swc) / float(c);
     for (int x = s.x; x < s.x + c; x++) {
-      if (wc.x >= 0 && wc.x < world_size && wc.y >= 0 && wc.y < world_size) {
-        Point pt(wc.x / 8, wc.y / 8); // tile point
+      if (wc.x >= 0 && wc.x < world.w && wc.y >= 0 && wc.y < world.h) {
+        const Point pixel(wc.x, wc.y);
+        const Point pt(pixel.x / size, pixel.y / size);
 
         int16_t tile_id = tile_at(pt) - 1;
 
-        if (tile_id != -1) {
-          Point sp(
-            (tile_id & 0b1111) * tile_size,
-            (tile_id / 16) * tile_size
-          ); // sprite sheet coordinates
+        if (tile_id >= 0 && tile_id < count) {
+          const Point sp(tile_id % columns * tile_size, tile_id / columns * tile_size);
 
-          Point uv(
-            (uint8_t(wc.x) & 0b111) >> mipmap_index,
-            (uint8_t(wc.y) & 0b111) >> mipmap_index
-          ); // texture coordinates
+          Point uv((pixel.x % size) >> mipmap_index, (pixel.y % size) >> mipmap_index);
 
           // apply uv transform for tile
           uint8_t transform = transform_at(pt);
           if (transform & 0b010) { uv.y = (tile_size - 1) - uv.y; }
           if (transform & 0b100) { uv.x = (tile_size - 1) - uv.x; }
-          if (transform & 0b001) { uint8_t tmp = uv.x; uv.x = uv.y; uv.y = tmp; }
+          if (transform & 0b001) std::swap(uv.x, uv.y);
 
           Point t = sp + uv;
 
@@ -255,7 +299,7 @@ namespace blit {
 
   uint8_t MapLayer::transform_at(Point p) {
     int32_t ti = map->tile_index(p);
-    return ti == -1 ? 0 : transforms[ti];
+    return ti < 0 || static_cast<std::size_t>(ti) >= transforms.size() ? 0 : transforms[ti];
   }
 
   uint8_t Map::get_flags(Point p) {
@@ -268,10 +312,10 @@ namespace blit {
   }
 
   void Map::tiles_in_rect(Rect vp, std::function<void(Point)> f) {
-    int minx = vp.x / 8;
-    int maxx = ((vp.x + vp.w) / 8);
-    int miny = vp.y / 8;
-    int maxy = ((vp.y + vp.h) / 8);
+    const auto first = cell_at({vp.x, vp.y});
+    const auto last = cell_at({vp.x + vp.w, vp.y + vp.h});
+    int minx = first.x, maxx = last.x;
+    int miny = first.y, maxy = last.y;
 
     minx = minx < 0 ? 0 : minx;
     miny = miny < 0 ? 0 : miny;

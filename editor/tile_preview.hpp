@@ -11,13 +11,13 @@ namespace editor {
   class TilePreview {
   public:
     void load(SDL_Renderer *renderer, const std::filesystem::path &map, const std::filesystem::path &atlas,
-              std::string_view transparent);
+              std::string_view transparent, int tile_size = blit::default_tile_size);
     void draw(ImDrawList &draw, ImVec2 top, ImVec2 bottom, double x, double y, double zoom) const;
     void draw_layers(size_t &selected);
     const std::string &error() const { return error_; }
     blit::Map *map() const { return map_.get(); }
     bool visible(size_t layer) const { return layer < visible_.size() && visible_[layer]; }
-    int tile_count() const { return std::min(255, (atlas_.width / 8) * (atlas_.height / 8)); }
+    int tile_count() const { return map_ && atlas_.texture ? blit::atlas_tile_count(atlas_.width, atlas_.height, map_->tile_size()) : 0; }
     bool save(const std::filesystem::path &path, std::string &error);
     PreviewImage release_atlas() { return std::move(atlas_); }
 

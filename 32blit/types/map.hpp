@@ -11,6 +11,7 @@
 
 #include "../types/rect.hpp"
 #include "../graphics/surface.hpp"
+#include "tile_geometry.hpp"
 
 namespace blit {
   struct Map;
@@ -28,6 +29,8 @@ namespace blit {
     uint8_t tile_at(blit::Point p);
     uint8_t transform_at(blit::Point p);
 
+    // Draw tiles intersecting the world-space viewport, mapping its origin to destination.
+    void draw(Surface &dest, Surface &atlas, Rect viewport, Point destination = {});
     void mipmap_texture_span(blit::Surface *dest, blit::Point s, uint16_t c, blit::Surface *sprites, Vec2 swc, Vec2 ewc);
     void texture_span(blit::Surface *dest, blit::Point s, uint16_t c, blit::Surface *sprites, Vec2 swc, Vec2 ewc, uint8_t mipmap_index = 0);
   };
@@ -42,6 +45,13 @@ namespace blit {
 
     Map(blit::Rect bounds);
 
+    // BTMP stores cells only. Configure world geometry from the associated tileset.
+    bool set_tile_size(int size);
+    int tile_size() const { return tile_size_; }
+    Size pixel_size() const { return {bounds.w * tile_size_, bounds.h * tile_size_}; }
+    Point cell_at(Point pixel) const;
+    Rect cell_rect(Point cell) const;
+
     void add_layer(std::string name, std::vector<uint8_t> tiles);
     int32_t tile_index(blit::Point p);
 
@@ -51,6 +61,8 @@ namespace blit {
     void tiles_in_rect(blit::Rect r, std::function<void(blit::Point)> f);
     bool set_tile(const std::string &layer, Point cell, uint8_t tile, uint8_t transform = 0);
 
+  private:
+    int tile_size_ = default_tile_size;
   };
 
   // Decodes a complete BTMP v1 asset; returns nullptr for malformed data.
