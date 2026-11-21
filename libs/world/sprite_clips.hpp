@@ -32,8 +32,8 @@ namespace sdk {
        image->get_ref<const std::string &>().find('\0') != std::string::npos) return "Expected a PNG image path.";
     SpriteClips asset;
     asset.image = image->get_ref<const std::string &>();
-    if(!number(json, "frame_width", 8, 2048, asset.frame_width) || !number(json, "frame_height", 8, 2048, asset.frame_height) ||
-       asset.frame_width % 8 || asset.frame_height % 8) return "Frame dimensions must be multiples of 8 (8–2048 px).";
+    if(!number(json, "frame_width", 1, 2048, asset.frame_width) || !number(json, "frame_height", 1, 2048, asset.frame_height))
+      return "Frame dimensions must be between 1 and 2048 pixels.";
     const auto clips = json.find("clips");
     if(clips == json.end() || !clips->is_object()) return "Expected clips keyed by name.";
     for(auto item = clips->begin(); item != clips->end(); ++item) {
@@ -48,7 +48,7 @@ namespace sdk {
       clip.frames.reserve(frames->size());
       for(const auto &frame : *frames) {
         SpriteFrame entry{};
-        if(!frame.is_object() || !number(frame, "cell", 0, 65535, entry.cell) ||
+        if(!frame.is_object() || !number(frame, "cell", 0, 2048u * 2048u - 1, entry.cell) ||
            !number(frame, "duration_ms", 1, 60000, entry.duration_ms)) return "Invalid frame cell or duration (1–60000 ms).";
         clip.frames.push_back(entry);
       }

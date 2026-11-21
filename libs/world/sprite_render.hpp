@@ -27,6 +27,7 @@ namespace sdk {
     }
     const unsigned cell = clip == asset.clips.end() ? 0 : sprite_cell_at(clip->second, elapsed_ms);
     if (!asset.frame_width || !asset.frame_height || sheet.bounds.w <= 0 || sheet.bounds.h <= 0) return false;
+    if(sheet.bounds.w % asset.frame_width || sheet.bounds.h % asset.frame_height) return false;
     const unsigned columns = static_cast<unsigned>(sheet.bounds.w) / asset.frame_width;
     const unsigned rows = static_cast<unsigned>(sheet.bounds.h) / asset.frame_height;
     if (!columns || cell / columns >= rows) return false;

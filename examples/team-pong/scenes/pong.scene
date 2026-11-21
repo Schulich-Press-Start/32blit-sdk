@@ -1,8 +1,8 @@
 scene 1 Pong
 prefab paddle
   Transform2D
-  Sprite asset=assets/paddle clip=pulse offset_x=-4 offset_y=-16
-  BoxCollider2D width=8 height=32 offset_x=-4 offset_y=-16
+  Sprite asset=assets/paddle clip=pulse offset_x=-5 offset_y=-18
+  BoxCollider2D width=10 height=36 offset_x=-5 offset_y=-18
   PaddleDrive
 entity player : paddle
   Transform2D x=24 y=120

@@ -37,7 +37,7 @@ struct PackedSurfaceDeleter {
     delete surface;
   }
 };
-std::unique_ptr<Surface, PackedSurfaceDeleter> court_sheet, actor_sheet;
+std::unique_ptr<Surface, PackedSurfaceDeleter> court_sheet, paddle_sheet, ball_sheet;
 
 struct Art {
   std::unique_ptr<Map> court;
@@ -58,17 +58,14 @@ bool read_bytes(const std::string &path, std::string &bytes) {
   return static_cast<bool>(file.seekg(0).read(bytes.data(), static_cast<std::streamsize>(length)));
 }
 
-bool read_clips(const char *path, sdk::SpriteClips &clips) {
+bool read_clips(const char *path, const char *image, const Surface &sheet, sdk::SpriteClips &clips) {
   std::ifstream file(path);
   const auto json = nlohmann::json::parse(file, nullptr, false);
   const char *error = sdk::read_sprite_clips(json, clips);
-  if (!error && (clips.image != "assets/actors.png" ||
-                 actor_sheet->bounds.w % clips.frame_width ||
-                 actor_sheet->bounds.h % clips.frame_height))
-    error = "expected the packed actors.png and a matching frame grid";
+  if (!error && (clips.image != image || sheet.bounds.w % clips.frame_width || sheet.bounds.h % clips.frame_height))
+    error = "expected the corresponding packed PNG and a matching frame grid";
   if (!error) {
-    const unsigned cells = (actor_sheet->bounds.w / clips.frame_width) *
-                           (actor_sheet->bounds.h / clips.frame_height);
+    const unsigned cells = (sheet.bounds.w / clips.frame_width) * (sheet.bounds.h / clips.frame_height);
     for (const auto &entry : clips.clips)
       for (const auto &frame : entry.second.frames)
         if (frame.cell >= cells) error = "frame outside the sheet";
@@ -90,8 +87,8 @@ bool read_scene_source(void *, std::string_view path, std::string_view &text) {
     std::fprintf(stderr, "%s: cannot read native map\n", map_path);
     return false;
   }
-  return read_clips("assets/paddle.sprite.json", staged_art.paddle) &&
-         read_clips("assets/ball.sprite.json", staged_art.ball);
+  return read_clips("assets/paddle.sprite.json", "assets/paddles.png", *paddle_sheet, staged_art.paddle) &&
+         read_clips("assets/ball.sprite.json", "assets/ball.png", *ball_sheet, staged_art.ball);
 }
 
 void finish_scene(void *, bool success) noexcept {
@@ -140,8 +137,9 @@ void init() {
   static sdk::SceneRuntime scenes(world, {24, 72, 160, 8}, {nullptr, read_scene_source, finish_scene});
 
   court_sheet.reset(Surface::load(packed_court));
-  actor_sheet.reset(Surface::load(packed_actors));
-  if (!court_sheet || !actor_sheet) return;
+  paddle_sheet.reset(Surface::load(packed_paddles));
+  ball_sheet.reset(Surface::load(packed_ball));
+  if (!court_sheet || !paddle_sheet || !ball_sheet) return;
   screen.sprites = court_sheet.get();
   sdk::SceneError error;
   if (!scenes.load(scene_path, error))
@@ -228,8 +226,8 @@ void render(uint32_t time) {
   draw_court(*art.court);
   world.each<Transform2D, Sprite>([&](sdk::Entity, const Transform2D &pos, const Sprite &sprite) {
     const std::string_view asset = sprite.asset;
-    if (asset == "assets/paddle") sdk::draw_sprite(screen, *actor_sheet, art.paddle, pos, sprite, Point(0, 0), time);
-    else if (asset == "assets/ball") sdk::draw_sprite(screen, *actor_sheet, art.ball, pos, sprite, Point(0, 0), time);
+    if (asset == "assets/paddle") sdk::draw_sprite(screen, *paddle_sheet, art.paddle, pos, sprite, Point(0, 0), time);
+    else if (asset == "assets/ball") sdk::draw_sprite(screen, *ball_sheet, art.ball, pos, sprite, Point(0, 0), time);
   });
   char hud[64];
   std::snprintf(hud, sizeof(hud), "YOU %u   TEAM PONG   %u CPU", player_score, cpu_score);
