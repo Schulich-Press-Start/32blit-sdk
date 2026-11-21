@@ -24,6 +24,8 @@ How to set up your editor:
 
 * [Visual Studio Code](docs/VSCode.md)
 
+For scene authoring, prefabs, and live playtesting, see the [32blit Editor Guide](editor/README.md).
+
 # Overview of what is inside?
 
 ## 32blit
@@ -51,6 +53,8 @@ The [32blit-examples](https://github.com/32blit/32blit-examples) repository cont
 Refer to the OS/platform specific documentation files in the `docs/` folder for instructions on how to compile and run these examples.
 
 To get started writing your own game, you should use the 32blit boilerplate - https://github.com/32blit/32blit-boilerplate/
+
+For a small game built around the scene editor and the World component system, follow the [Pong tutorial](docs/Pong.md).
 
 ## Help & Support
 

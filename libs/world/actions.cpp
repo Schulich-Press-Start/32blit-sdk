@@ -306,7 +306,7 @@ namespace sdk {
       out.token(text.target);
       out.append(" : ");
       out.token(text.target);
-      out.append(" name=\"\"\n  Transform x=");
+      out.append(" name=\"\"\n  Transform2D x=");
       out.token(text.path);
       out.append(" y=");
       out.token(text.value);

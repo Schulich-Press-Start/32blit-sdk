@@ -178,14 +178,14 @@ TEST(World, NamedCreationRejectsDuplicatesAndExhaustionWithoutLeakingSlots) {
 TEST(World, RegistryFieldEditIsVisibleToTypedGameCode) {
   sdk::World world(2);
   sdk::ComponentPool<sdk::Name> names(world, 2);
-  sdk::ComponentPool<sdk::Transform> transforms(world, 2);
+  sdk::ComponentPool<sdk::Transform2D> transforms(world, 2);
   auto player = world.create("player"), door = world.create("door");
-  auto *transform = world.add<sdk::Transform>(player);
+  auto *transform = world.add<sdk::Transform2D>(player);
   ASSERT_NE(transform, nullptr);
   transform->y = 81;
-  ASSERT_NE(world.add<sdk::Transform>(door), nullptr);
+  ASSERT_NE(world.add<sdk::Transform2D>(door), nullptr);
 
-  const auto *info = sdk::find_component("Transform");
+  const auto *info = sdk::find_component("Transform2D");
   ASSERT_NE(info, nullptr);
   const auto *field = sdk::find_field(*info, "x");
   ASSERT_NE(field, nullptr);
@@ -193,11 +193,11 @@ TEST(World, RegistryFieldEditIsVisibleToTypedGameCode) {
   auto *data = static_cast<char *>(world.get(world.find("player"), info->id));
   ASSERT_NE(data, nullptr);
   EXPECT_TRUE(sdk::parse_value(field->type, "200", data + field->offset));
-  auto *read_back = std::as_const(world).get<sdk::Transform>(player);
+  auto *read_back = std::as_const(world).get<sdk::Transform2D>(player);
   ASSERT_NE(read_back, nullptr);
   EXPECT_FLOAT_EQ(read_back->x, 200);
   EXPECT_FLOAT_EQ(read_back->y, 81);
-  EXPECT_FLOAT_EQ(world.get<sdk::Transform>(door)->x, 0);
+  EXPECT_FLOAT_EQ(world.get<sdk::Transform2D>(door)->x, 0);
 }
 
 TEST(World, RegistryDispatchRespectsCapacityOwnershipAndPoolLifetime) {
@@ -232,69 +232,69 @@ TEST(World, RegistryDispatchRespectsCapacityOwnershipAndPoolLifetime) {
 
 TEST(WorldQuery, VisitsOnlyMatchesAfterSwapRemovalAndRecycling) {
   sdk::World world(4);
-  sdk::ComponentPool<sdk::Transform> transforms(world, 4);
+  sdk::ComponentPool<sdk::Transform2D> transforms(world, 4);
   sdk::ComponentPool<Velocity> velocities(world, 3);
   auto removed = world.create(), moving = world.create(), still = world.create();
-  ASSERT_NE(world.add<sdk::Transform>(removed), nullptr);
-  ASSERT_NE(world.add<sdk::Transform>(moving), nullptr);
-  ASSERT_NE(world.add<sdk::Transform>(still), nullptr);
-  ASSERT_NE(world.add<sdk::Transform>(world.create()), nullptr);
+  ASSERT_NE(world.add<sdk::Transform2D>(removed), nullptr);
+  ASSERT_NE(world.add<sdk::Transform2D>(moving), nullptr);
+  ASSERT_NE(world.add<sdk::Transform2D>(still), nullptr);
+  ASSERT_NE(world.add<sdk::Transform2D>(world.create()), nullptr);
   ASSERT_NE(world.add<Velocity>(removed), nullptr);
   auto *velocity = world.add<Velocity>(moving);
   ASSERT_NE(velocity, nullptr);
   velocity->dx = 6;
   ASSERT_TRUE(world.destroy(removed));
   const auto recycled = world.create();
-  ASSERT_NE(world.add<Velocity>(recycled), nullptr); // no Transform
+  ASSERT_NE(world.add<Velocity>(recycled), nullptr); // no Transform2D
 
   int visits = 0;
-  world.each<sdk::Transform, Velocity>([&](sdk::Entity entity, sdk::Transform &t, Velocity &v) {
+  world.each<sdk::Transform2D, Velocity>([&](sdk::Entity entity, sdk::Transform2D &t, Velocity &v) {
     EXPECT_EQ(entity.index(), moving.index());
     EXPECT_EQ(entity.generation(), moving.generation());
     EXPECT_TRUE(world.alive(entity));
     t.x += v.dx;
     ++visits;
   });
-  world.each<Velocity, sdk::Transform>([](sdk::Entity, const Velocity &v, sdk::Transform &t) {
+  world.each<Velocity, sdk::Transform2D>([](sdk::Entity, const Velocity &v, sdk::Transform2D &t) {
     t.x += v.dx;
   });
   EXPECT_EQ(visits, 1);
-  EXPECT_FLOAT_EQ(world.get<sdk::Transform>(moving)->x, 12);
-  EXPECT_FLOAT_EQ(world.get<sdk::Transform>(still)->x, 0);
+  EXPECT_FLOAT_EQ(world.get<sdk::Transform2D>(moving)->x, 12);
+  EXPECT_FLOAT_EQ(world.get<sdk::Transform2D>(still)->x, 0);
 }
 
 TEST(WorldQuery, MissingOrEmptyPoolProducesNoMatches) {
   sdk::World world(1);
-  sdk::ComponentPool<sdk::Transform> transforms(world, 1);
-  ASSERT_NE(world.add<sdk::Transform>(world.create()), nullptr);
-  auto unexpected = [](sdk::Entity, sdk::Transform &, Velocity &) { ADD_FAILURE(); };
-  world.each<sdk::Transform, Velocity>(unexpected);
+  sdk::ComponentPool<sdk::Transform2D> transforms(world, 1);
+  ASSERT_NE(world.add<sdk::Transform2D>(world.create()), nullptr);
+  auto unexpected = [](sdk::Entity, sdk::Transform2D &, Velocity &) { ADD_FAILURE(); };
+  world.each<sdk::Transform2D, Velocity>(unexpected);
   sdk::ComponentPool<Velocity> velocities(world, 1);
-  world.each<sdk::Transform, Velocity>(unexpected);
+  world.each<sdk::Transform2D, Velocity>(unexpected);
 }
 
 TEST(WorldQuery, NestedAndThrowingCallbacksKeepMutationGuardScoped) {
   sdk::World world(2);
-  sdk::ComponentPool<sdk::Transform> transforms(world, 2);
+  sdk::ComponentPool<sdk::Transform2D> transforms(world, 2);
   auto entity = world.create();
-  ASSERT_NE(world.add<sdk::Transform>(entity), nullptr);
+  ASSERT_NE(world.add<sdk::Transform2D>(entity), nullptr);
 
-  auto query = [&](sdk::Entity current, sdk::Transform &t) {
-    world.each<sdk::Transform>([&](sdk::Entity nested, sdk::Transform &inner) {
+  auto query = [&](sdk::Entity current, sdk::Transform2D &t) {
+    world.each<sdk::Transform2D>([&](sdk::Entity nested, sdk::Transform2D &inner) {
       EXPECT_FALSE(world.destroy(nested));
       inner.x = 5;
     });
     EXPECT_FALSE(world.create());
     EXPECT_FALSE(world.destroy(current));
-    EXPECT_FALSE(world.remove<sdk::Transform>(current));
-    EXPECT_EQ(world.add<sdk::Transform>(current), nullptr);
+    EXPECT_FALSE(world.remove<sdk::Transform2D>(current));
+    EXPECT_EQ(world.add<sdk::Transform2D>(current), nullptr);
     EXPECT_FALSE(transforms.erase(current));
     EXPECT_EQ(transforms.emplace(current), nullptr);
     EXPECT_THROW((sdk::ComponentPool<Velocity>(world, 1)), std::logic_error);
     EXPECT_FLOAT_EQ(t.x, 5);
     throw 1;
   };
-  EXPECT_THROW(world.each<sdk::Transform>(query), int);
-  EXPECT_TRUE(world.remove<sdk::Transform>(entity));
+  EXPECT_THROW(world.each<sdk::Transform2D>(query), int);
+  EXPECT_TRUE(world.remove<sdk::Transform2D>(entity));
   EXPECT_TRUE(world.create());
 }

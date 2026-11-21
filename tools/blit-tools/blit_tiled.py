@@ -238,6 +238,8 @@ def _atlas(project, tmx, root, flags):
     for key, expected in (('width', columns * 8), ('height', count // columns * 8)):
         if key in images[0].attrib:
             _integer(images[0].get(key), expected, expected, f'atlas image {key}')
+    image = _inside(project, (tsx or tmx).parent / _relative(images[0].get('source'), allow_parent=True))
+    atlas = [image.relative_to(project).as_posix(), images[0].get('trans', '')]
     grids = tileset.findall('grid')
     _require(len(grids) <= 1 and all(grid.get('orientation') == 'orthogonal' for grid in grids),
              'tileset grid must be orthogonal')
@@ -268,7 +270,7 @@ def _atlas(project, tmx, root, flags):
             if raw in ('true', '1'):
                 values[tile_id + 1] |= 1 << labels[name]
     _require(first + count - 1 <= 0x0FFFFFFF, 'tileset GIDs overlap transform flags')
-    return first, count, tsx, struct.pack('<4sQ256I', b'BTP1', _flag_schema(flags), *values)
+    return first, count, tsx, struct.pack('<4sQ256I', b'BTP1', _flag_schema(flags), *values), atlas
 
 
 def _gids(data, count, label):
@@ -454,7 +456,7 @@ def _compile(project, source, tmx, classes, registry, flags):
     width = _integer(root.get('width'), 1, 0xFFFF, 'map width')
     height = _integer(root.get('height'), 1, 0xFFFF, 'map height')
     _require(width * height <= 0x7FFFFFFF, 'map exceeds signed engine tile index range')
-    first, tile_count, tsx, tile_props = _atlas(project, tmx, root, flags)
+    first, tile_count, tsx, tile_props, atlas = _atlas(project, tmx, root, flags)
     layers, layer_names, objects, object_names, keys, stable_keys = [], set(), [], set(), {}, set()
     for layer in root:
         if layer.tag not in ('layer', 'objectgroup'):
@@ -484,7 +486,7 @@ def _compile(project, source, tmx, classes, registry, flags):
     for obj, key, label in objects:
         lines.extend(_entity(obj, key, label, keys, classes, registry))
     packed = struct.pack('<4sHHHH', b'BTMP', 1, width, height, len(layers)) + b''.join(layers)
-    return packed, lines, tsx, tile_props
+    return packed, lines, tsx, tile_props, atlas
 
 
 def _replace(path, content):
@@ -521,7 +523,7 @@ def import_map(project: Path, source: str, schema: Path, registry: Path,
     schema, registry = schema.resolve(), registry.resolve()
     try:
         classes, components = _contract(schema, registry)
-        packed, lines, tsx, tile_props = _compile(project, source, tmx, classes, components, _tile_flags(schema))
+        packed, lines, tsx, tile_props, atlas = _compile(project, source, tmx, classes, components, _tile_flags(schema))
     except ValueError as exc:
         raise ValueError(f'{source}: {exc}') from exc
     generation = hashlib.sha256(packed)
@@ -530,7 +532,8 @@ def import_map(project: Path, source: str, schema: Path, registry: Path,
     map_name = 'generated/' + source[:-4] + '-' + digest + '.map'
     map_file = _inside(project, project / map_name)
     props_file = _inside(project, project / (map_name + '.props'))
-    scene_text = '\n'.join(['scene 1 Tiled', '# blit-map ' + map_name, *lines, '']).encode('utf-8')
+    scene_text = '\n'.join(['scene 1 Tiled', '# blit-map ' + map_name,
+                            '# blit-atlas ' + json.dumps([*atlas, source], ensure_ascii=False), *lines, '']).encode('utf-8')
     inputs = {tmx, schema, registry}
     if tsx is not None:
         inputs.add(tsx)

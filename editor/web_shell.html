@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>32blit editor</title>
+  <style>
+    :root { color-scheme: light; font: 16px system-ui, sans-serif; color: #29333b; background: #faf7f0; }
+    body { margin: 0; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; padding: .5rem .65rem; background: #e0e3db; border-bottom: 1px solid #bfbfba; }
+    button { font: inherit; color: inherit; padding: .25rem .55rem; border: 1px solid #bfbfba; border-radius: 3px; background: #faf7f0; }
+    button:hover:enabled { background: #c4ded1; }
+    button:focus-visible { outline: 2px solid #3d7366; outline-offset: 2px; }
+    button:disabled { opacity: .55; }
+    #editor-status { overflow-wrap: anywhere; }
+    dialog { color: inherit; background: #faf7f0; border: 1px solid #bfbfba; border-radius: 3px; }
+    dialog h2 { margin: 0; font-size: 1.125rem; }
+    input { font: inherit; color: inherit; }
+    #new-project-error:empty { display: none; }
+    #canvas { display: block; flex: 1; width: 100%; min-height: 0; height: 0; touch-action: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="new-project" type="button" disabled>New Project</button>
+    <button id="import-project" type="button" disabled>Import Project ZIP</button>
+    <input id="project-zip" type="file" accept=".zip,application/zip" hidden>
+    <button id="export-project" type="button" disabled>Export Project ZIP</button>
+    <span id="editor-status" role="status">Loading editor…</span>
+  </header>
+  <dialog id="new-project-dialog" aria-labelledby="new-project-title">
+    <form id="new-project-form">
+      <h2 id="new-project-title">New Project</h2>
+      <p><label for="new-project-name">Project name</label>
+        <input id="new-project-name" type="text" maxlength="80" required autofocus></p>
+      <p id="new-project-error" role="alert"></p>
+      <button id="create-project" type="submit">Create Project</button>
+      <button id="cancel-new-project" type="button">Cancel</button>
+    </form>
+  </dialog>
+  <canvas id="canvas" tabindex="0" aria-label="32blit editing workspace"></canvas>
+  {{{ SCRIPT }}}
+</body>
+</html>

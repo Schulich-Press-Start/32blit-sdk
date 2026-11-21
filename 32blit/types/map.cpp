@@ -99,6 +99,43 @@ namespace blit {
     return map;
   }
 
+  std::vector<uint8_t> write_map(const Map &map) {
+    const auto w = map.bounds.w, h = map.bounds.h;
+    if(w <= 0 || h <= 0 || w > 65535 || h > 65535 || w > INT32_MAX / h ||
+       map.layer_order.empty() || map.layer_order.size() > 65535 || map.layer_order.size() != map.layers.size()) return {};
+    const size_t cells = size_t(w) * h;
+    std::vector<uint8_t> bytes{'B','T','M','P',1,0};
+    for(auto value : {unsigned(w), unsigned(h), unsigned(map.layer_order.size())}) {
+      bytes.push_back(uint8_t(value));
+      bytes.push_back(uint8_t(value >> 8));
+    }
+    for(size_t i = 0; i < map.layer_order.size(); ++i) {
+      const auto &name = map.layer_order[i];
+      const auto layer = map.layers.find(name);
+      if(name.empty() || name.size() > 255 || name.find('\0') != name.npos ||
+         !valid_utf8(reinterpret_cast<const uint8_t *>(name.data()), name.size()) ||
+         std::find(map.layer_order.begin(), map.layer_order.begin() + i, name) != map.layer_order.begin() + i ||
+         layer == map.layers.end() || layer->second.tiles.size() != cells || layer->second.transforms.size() != cells ||
+         std::any_of(layer->second.transforms.begin(), layer->second.transforms.end(), [](uint8_t t) { return t > 7; })) return {};
+      bytes.push_back(uint8_t(name.size()));
+      bytes.insert(bytes.end(), name.begin(), name.end());
+      bytes.insert(bytes.end(), layer->second.tiles.begin(), layer->second.tiles.end());
+      bytes.insert(bytes.end(), layer->second.transforms.begin(), layer->second.transforms.end());
+    }
+    return bytes;
+  }
+
+  bool Map::set_tile(const std::string &layer, Point cell, uint8_t tile, uint8_t transform) {
+    const auto index = tile_index(cell);
+    if(index < 0 || transform > 7) return false;
+    const auto found = layers.find(layer);
+    if(found == layers.end() || size_t(index) >= found->second.tiles.size() ||
+       size_t(index) >= found->second.transforms.size()) return false;
+    found->second.tiles[index] = tile;
+    found->second.transforms[index] = transform;
+    return true;
+  }
+
   std::string_view tiled_map_path(std::string_view generated_scene) {
     const auto first_break = generated_scene.find('\n');
     if (first_break == std::string_view::npos)

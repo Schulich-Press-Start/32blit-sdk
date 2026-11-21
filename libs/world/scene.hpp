@@ -45,14 +45,25 @@ namespace sdk {
     explicit SceneDocument(SceneLimits limits);
     SceneDocument(const SceneDocument &) = delete;
     SceneDocument &operator=(const SceneDocument &) = delete;
+    // Explicit snapshot for host authoring; retains the same borrowed registry.
+    void restore_from(const SceneDocument &source);
 
     std::string_view title() const { return title_; }
     bool snapshot() const { return snapshot_; }
+    bool uses_external_metadata() const { return types_ != nullptr; }
     std::string_view snapshot_source() const { return snapshot_source_; }
     const std::vector<SceneSource> &sources() const { return sources_; }
     const std::vector<SceneObject> &objects() const { return objects_; }
     const SceneComponent &component(uint32_t index) const { return components_[index]; }
     const SceneField &field(uint32_t index) const { return fields_[index]; }
+    const ComponentInfo *type(uint16_t id) const;
+
+    // Object indices select entities and prefabs unambiguously, even when keys match.
+    bool add_object(std::string_view key, std::string_view base, bool prefab, SceneError &error);
+    bool duplicate_entity(uint32_t object, std::string_view key, SceneError &error);
+    bool delete_entity(uint32_t object, SceneError &error);
+    bool edit_component(uint32_t object, uint16_t type, bool add, SceneError &error);
+    bool edit_field(uint32_t object, uint16_t type, uint8_t field, const std::string_view *value, SceneError &error);
 
   private:
     friend struct SceneParser;
@@ -60,12 +71,16 @@ namespace sdk {
     friend bool set_scene_field(SceneDocument &, std::string_view, std::string_view, std::string_view,
                                 std::string_view, SceneError &);
     friend bool rename_scene_entity(SceneDocument &, std::string_view, std::string_view, SceneError &);
+    SceneObject *editable_object(uint32_t index, SceneError &error);
+    void erase_field(uint32_t &link);
     void clear();
     void swap(SceneDocument &other) noexcept;
     SceneLimits limits_;
     char title_[scene_key_size] = {};
     char snapshot_source_[scene_path_size] = {};
     bool snapshot_ = false;
+    const ComponentInfo *types_ = nullptr;
+    uint16_t type_count_ = 0;
     std::vector<SceneSource> sources_;
     std::vector<SceneObject> objects_;
     std::vector<SceneComponent> components_;
@@ -77,6 +92,11 @@ namespace sdk {
                   SceneReader reader, SceneError &error);
   /// Validate a project-relative path before loading the root through reader.
   bool read_scene_file(SceneDocument &out, std::string_view path, SceneReader reader, SceneError &error);
+  /// Read an authored scene using metadata in display order (ids equal array indices).
+  /// Keep the metadata alive and unchanged while using the document. Runtime instantiation
+  /// requires a document parsed against the actual C++ component registry instead.
+  bool read_scene_authoring(SceneDocument &out, std::string_view path, SceneReader reader, SceneError &error,
+                            const ComponentInfo *types, uint16_t count);
   /// Write the authored root only (keeps include directives, not included data).
   int write_scene(const SceneDocument &scene, char *buf, int cap);
   /// Edit a root entity or prefab by stable key (includes are read-only).

@@ -147,6 +147,8 @@ namespace sdk {
     title_[0] = '\0';
     snapshot_source_[0] = '\0';
     snapshot_ = false;
+    types_ = nullptr;
+    type_count_ = 0;
     sources_.clear();
     objects_.clear();
     components_.clear();
@@ -157,25 +159,42 @@ namespace sdk {
     SceneDocument &doc;
     SceneReader reader;
     SceneError &error;
+    const ComponentInfo *types = nullptr;
+    uint16_t type_count = 0;
 
     bool read(std::string_view text, std::string_view path, bool from_reader) {
       error = {};
-      if(!valid_path(path)) {
-        scene_error(error, path, 0, "invalid project-relative scene path");
-        doc.clear();
-        return false;
-      }
+      doc.clear();
+      if(!valid_path(path)) return scene_error(error, path, 0, "invalid project-relative scene path");
+      if(types && !valid_types()) return scene_error(error, path, 0, "invalid scene component metadata");
       SceneSource root{{}, scene_end};
       scene_copy(root.path, sizeof(root.path), path);
-      doc.clear();
       if(full(doc.sources_, doc.limits_.sources)) return scene_error(error, root.path, 0, "scene source limit exceeded");
       doc.sources_.push_back(root);
-      if((!from_reader || fetch(0, text, 0, 0)) && parse_source(text, 0) && validate_references()) return true;
+      if((!from_reader || fetch(0, text, 0, 0)) && parse_source(text, 0) && validate_references()) {
+        if(!types || !doc.snapshot_) {
+          doc.types_ = types;
+          doc.type_count_ = type_count;
+          return true;
+        }
+        fail(0, 1, "expected an authored scene");
+      }
       doc.clear();
       return false;
     }
 
   private:
+    bool valid_types() const {
+      if(type_count > max_components || (!types && type_count)) return false;
+      for(uint16_t i = 0; i < type_count; ++i) {
+        const auto &type = types[i];
+        if(type.id != i || !type.name || type.field_count > max_component_fields ||
+           (!type.fields && type.field_count)) return false;
+        for(uint8_t j = 0; j < type.field_count; ++j) if(!type.fields[j].name) return false;
+      }
+      return true;
+    }
+
     bool fail(uint32_t source, uint32_t line, std::string_view message) {
       return scene_error(error, doc.sources_[source].path, line, message);
     }
@@ -307,7 +326,10 @@ namespace sdk {
     bool parse_component(SceneLine &input, SceneObject &object, uint32_t line) {
       const auto name = input.word();
       if(name == "Name" && !doc.snapshot_) return fail(object.source, line, "use name= on the entity header instead of Name");
-      const auto *info = scene_component(name);
+      const auto *info = types ? nullptr : scene_component(name);
+      if(types) for(uint16_t i = 0; i < type_count; ++i) {
+        if(name == types[i].name) { info = types + i; break; }
+      }
       if(!info) return fail(object.source, line, "unknown scene component");
       auto &component = record_link(doc.components_, object.first_component, &SceneComponent::type, info->id);
       if(component != scene_end) return fail(object.source, line, "duplicate scene component");
@@ -340,7 +362,7 @@ namespace sdk {
           return fail(object.source, object.line, "unknown base prefab");
         for(auto c = object.first_component; c != scene_end; c = doc.components_[c].next) {
           const auto &component = doc.components_[c];
-          const auto &info = *component_by_id(component.type);
+          const auto &info = types ? types[component.type] : *component_by_id(component.type);
           for(auto f = component.first_field; f != scene_end; f = doc.fields_[f].next) {
             const auto &field = doc.fields_[f];
             if(!resolved_value(doc, info.fields[field.field].type, field.value))
@@ -359,6 +381,12 @@ namespace sdk {
 
   bool read_scene_file(SceneDocument &out, std::string_view path, SceneReader reader, SceneError &error) {
     return SceneParser{out, reader, error}.read({}, path, true);
+  }
+
+  bool read_scene_authoring(SceneDocument &out, std::string_view path, SceneReader reader, SceneError &error,
+                            const ComponentInfo *types, uint16_t count) {
+    if(!types) return SceneParser{out, reader, error}.read({}, {}, true);
+    return SceneParser{out, reader, error, types, count}.read({}, path, true);
   }
 
   int write_scene(const SceneDocument &scene, char *buf, int cap) {
@@ -396,7 +424,7 @@ namespace sdk {
       out.append("\n");
       for(auto c = object.first_component; c != scene_end; c = scene.component(c).next) {
         const auto &component = scene.component(c);
-        const auto *info = component_by_id(component.type);
+        const auto *info = scene.type(component.type);
         if(!info) return out.fail();
         out.append("  ");
         out.append(info->name);
@@ -413,53 +441,193 @@ namespace sdk {
     return out.finish();
   }
 
-  bool set_scene_field(SceneDocument &doc, std::string_view key, std::string_view component,
-                       std::string_view field, std::string_view value, SceneError &error) {
-    error = {};
-    // Prefer entities when both namespaces contain the given key.
-    auto index = object_index(doc, key, false);
-    if(index == scene_end) index = object_index(doc, key, true);
-    if(index == scene_end) {
-      const std::string_view path = doc.sources_.empty() ? std::string_view{} : doc.sources_[0].path;
-      return scene_error(error, path, 0, "unknown entity or prefab key");
-    }
-    auto &object = doc.objects_[index];
-    const auto fail = [&](std::string_view message) {
-      return scene_error(error, doc.sources_[object.source].path, object.line, message);
-    };
-    if(object.source != 0) return fail("included scene objects are read-only");
-    if(component == "Name" && !doc.snapshot_) return fail("use rename_scene_entity instead of editing Name");
-    const auto *info = scene_component(component);
-    if(!info) return fail("unknown scene component");
-    SceneField entry{};
-    entry.field = scene_field(*info, field);
-    if(entry.field == info->field_count) return fail("unknown scene field");
-    const auto type = info->fields[entry.field].type;
-    if(!scene_copy(entry.value, sizeof(entry.value), value) || value.find('\0') != value.npos || !valid_value(type, entry.value))
-      return fail("invalid scene field value");
-    if(!resolved_value(doc, type, entry.value)) return fail("unknown entity reference target");
+  const ComponentInfo *SceneDocument::type(uint16_t id) const {
+    return types_ ? (id < type_count_ ? types_ + id : nullptr) : component_by_id(id);
+  }
 
-    auto &c = record_link(doc.components_, object.first_component, &SceneComponent::type, info->id);
-    uint32_t *f = nullptr;
-    if(c == scene_end) {
-      if(full(doc.components_, doc.limits_.components)) return fail("scene component limit exceeded");
-    } else {
-      f = &record_link(doc.fields_, doc.components_[c].first_field, &SceneField::field, entry.field);
-      if(*f != scene_end) {
-        std::memcpy(doc.fields_[*f].value, entry.value, value.size() + 1);
-        return true;
+  SceneObject *SceneDocument::editable_object(uint32_t index, SceneError &error) {
+    error = {};
+    if(index >= objects_.size()) {
+      scene_error(error, sources_.empty() ? "" : sources_[0].path, 0, "unknown entity or prefab");
+      return nullptr;
+    }
+    auto &object = objects_[index];
+    if(object.source == 0) return &object;
+    scene_error(error, sources_[object.source].path, object.line, "included scene objects are read-only");
+    return nullptr;
+  }
+
+  bool SceneDocument::add_object(std::string_view key, std::string_view base, bool prefab, SceneError &error) {
+    error = {};
+    const std::string_view path = sources_.empty() ? "" : sources_[0].path;
+    if(sources_.empty() || snapshot_) return scene_error(error, path, 0, "expected an authored scene");
+    if(!valid_key(key) || (!prefab && key.size() >= string_field_size))
+      return scene_error(error, path, 0, "invalid key (entity keys must fit the default name)");
+    if(object_index(*this, key, prefab) != scene_end) return scene_error(error, path, 0, "duplicate scene object key");
+    if(!base.empty() && (prefab || object_index(*this, base, true) == scene_end))
+      return scene_error(error, path, 0, "invalid base prefab");
+    if(!prefab) for(const auto &other : objects_)
+      if(!other.prefab && key == other.name) return scene_error(error, path, 0, "duplicate entity name");
+    if(full(objects_, limits_.objects)) return scene_error(error, path, 0, "scene object limit exceeded");
+    SceneObject object{};
+    object.prefab = prefab;
+    scene_copy(object.key, sizeof(object.key), key);
+    scene_copy(object.base, sizeof(object.base), base);
+    if(!prefab) scene_copy(object.name, sizeof(object.name), key);
+    objects_.push_back(object);
+    return true;
+  }
+
+  void SceneDocument::restore_from(const SceneDocument &source) {
+    sources_.reserve(source.limits_.sources);
+    objects_.reserve(source.limits_.objects);
+    components_.reserve(source.limits_.components);
+    fields_.reserve(source.limits_.fields);
+    limits_ = source.limits_;
+    sources_ = source.sources_;
+    objects_ = source.objects_;
+    components_ = source.components_;
+    fields_ = source.fields_;
+    std::memcpy(title_, source.title_, sizeof(title_));
+    std::memcpy(snapshot_source_, source.snapshot_source_, sizeof(snapshot_source_));
+    snapshot_ = source.snapshot_;
+    types_ = source.types_;
+    type_count_ = source.type_count_;
+  }
+
+  bool SceneDocument::duplicate_entity(uint32_t index, std::string_view key, SceneError &error) {
+    const auto *source = editable_object(index, error);
+    if(!source) return false;
+    if(source->prefab || snapshot_) return scene_error(error, sources_[0].path, source->line, "expected a placed entity");
+    auto components = components_.size(), fields = fields_.size();
+    for(auto c = source->first_component; c != scene_end; c = components_[c].next) {
+      ++components;
+      for(auto f = components_[c].first_field; f != scene_end; f = fields_[f].next) ++fields;
+    }
+    if(components > limits_.components || fields > limits_.fields)
+      return scene_error(error, sources_[0].path, source->line, "duplicate exceeds scene budget");
+    if(!add_object(key, source->base, false, error)) return false;
+    const auto target = static_cast<uint32_t>(objects_.size() - 1);
+    for(auto c = source->first_component; c != scene_end; c = components_[c].next) {
+      const auto &component = components_[c];
+      edit_component(target, component.type, true, error);
+      for(auto f = component.first_field; f != scene_end; f = fields_[f].next) {
+        const auto &field = fields_[f];
+        const bool self = type(component.type)->fields[field.field].type == FieldType::Entity &&
+                          field.value[0] == '@' && std::string_view(field.value + 1) == source->key;
+        char reference[string_field_size + 1] = {'@'};
+        if(self) scene_copy(reference + 1, string_field_size, key);
+        const std::string_view value = self ? reference : field.value;
+        edit_field(target, component.type, field.field, &value, error);
       }
     }
-    if(full(doc.fields_, doc.limits_.fields)) return fail("scene field limit exceeded");
-    if(!f) {
-      c = static_cast<uint32_t>(doc.components_.size());
-      doc.components_.push_back({info->id, object.line});
-      f = &doc.components_.back().first_field;
-    }
-    entry.line = object.line;
-    *f = static_cast<uint32_t>(doc.fields_.size());
-    doc.fields_.push_back(entry);
     return true;
+  }
+
+  bool SceneDocument::delete_entity(uint32_t index, SceneError &error) {
+    auto *object = editable_object(index, error);
+    if(!object) return false;
+    if(object->prefab || snapshot_) return scene_error(error, sources_[0].path, object->line, "expected a placed entity");
+    for(const auto &other : objects_) {
+      if(&other == object) continue;
+      for(auto c = other.first_component; c != scene_end; c = components_[c].next) {
+        const auto &component = components_[c];
+        const auto *info = type(component.type);
+        for(auto f = component.first_field; f != scene_end; f = fields_[f].next) {
+          const auto &field = fields_[f];
+          if(info->fields[field.field].type == FieldType::Entity && field.value[0] == '@' &&
+             std::string_view(field.value + 1) == object->key)
+            return scene_error(error, sources_[other.source].path, field.line, "entity is still referenced");
+        }
+      }
+    }
+    while(object->first_component != scene_end)
+      edit_component(index, components_[object->first_component].type, false, error);
+    objects_.erase(objects_.begin() + index);
+    return true;
+  }
+
+  void SceneDocument::erase_field(uint32_t &link) {
+    const auto index = link;
+    link = fields_[index].next;
+    fields_.erase(fields_.begin() + index);
+    for(auto &component : components_) if(component.first_field != scene_end && component.first_field > index) --component.first_field;
+    for(auto &field : fields_) if(field.next != scene_end && field.next > index) --field.next;
+  }
+
+  bool SceneDocument::edit_component(uint32_t index, uint16_t id, bool add, SceneError &error) {
+    auto *object = editable_object(index, error);
+    if(!object) return false;
+    const auto fail = [&](const char *message) { return scene_error(error, sources_[0].path, object->line, message); };
+    const auto *info = type(id);
+    if(!info || (!snapshot_ && std::string_view(info->name) == "Name")) return fail("component cannot be added or removed here");
+    auto &link = record_link(components_, object->first_component, &SceneComponent::type, id);
+    if(add) {
+      if(link != scene_end) return fail("component already present");
+      if(full(components_, limits_.components)) return fail("scene component limit exceeded");
+      link = static_cast<uint32_t>(components_.size());
+      components_.push_back({id, object->line});
+    } else {
+      if(link == scene_end) return fail("component is not set on this object");
+      const auto removed = link;
+      auto &component = components_[removed];
+      while(component.first_field != scene_end) erase_field(component.first_field);
+      link = component.next;
+      components_.erase(components_.begin() + removed);
+      for(auto &entry : objects_) if(entry.first_component != scene_end && entry.first_component > removed) --entry.first_component;
+      for(auto &entry : components_) if(entry.next != scene_end && entry.next > removed) --entry.next;
+    }
+    return true;
+  }
+
+  bool SceneDocument::edit_field(uint32_t index, uint16_t id, uint8_t field, const std::string_view *value, SceneError &error) {
+    auto *object = editable_object(index, error);
+    if(!object) return false;
+    const auto fail = [&](const char *message) { return scene_error(error, sources_[0].path, object->line, message); };
+    const auto *info = type(id);
+    if(!info || field >= info->field_count) return fail("unknown scene field");
+    if(!snapshot_ && std::string_view(info->name) == "Name") return fail("use name= on the entity header");
+    auto &c = record_link(components_, object->first_component, &SceneComponent::type, id);
+    auto *f = c == scene_end ? nullptr : &record_link(fields_, components_[c].first_field, &SceneField::field, field);
+    if(!value) {
+      if(!f || *f == scene_end) return fail("field has no local override");
+      erase_field(*f);
+      return true;
+    }
+    SceneField entry{};
+    const auto field_type = info->fields[field].type;
+    if(!scene_copy(entry.value, sizeof(entry.value), *value) || value->find('\0') != value->npos ||
+       !valid_value(field_type, entry.value)) return fail("invalid scene field value");
+    if(!resolved_value(*this, field_type, entry.value)) return fail("unknown entity reference target");
+    if(f && *f != scene_end) {
+      std::memcpy(fields_[*f].value, entry.value, value->size() + 1);
+      return true;
+    }
+    if(full(fields_, limits_.fields)) return fail("scene field limit exceeded");
+    if(!f) {
+      if(full(components_, limits_.components)) return fail("scene component limit exceeded");
+      c = static_cast<uint32_t>(components_.size());
+      components_.push_back({id, object->line});
+      f = &components_.back().first_field;
+    }
+    entry.field = field;
+    entry.line = object->line;
+    *f = static_cast<uint32_t>(fields_.size());
+    fields_.push_back(entry);
+    return true;
+  }
+
+  bool set_scene_field(SceneDocument &doc, std::string_view key, std::string_view component,
+                       std::string_view field, std::string_view value, SceneError &error) {
+    auto index = object_index(doc, key, false);
+    if(index == scene_end) index = object_index(doc, key, true);
+    if(!doc.editable_object(index, error)) return false;
+    const auto count = doc.types_ ? doc.type_count_ : component_count();
+    for(uint16_t id = 0; id < count; ++id) {
+      const auto &info = *doc.type(id);
+      if(component == info.name) return doc.edit_field(index, id, scene_field(info, field), &value, error);
+    }
+    return scene_error(error, doc.sources_[0].path, doc.objects_[index].line, "unknown scene component");
   }
 
   bool rename_scene_entity(SceneDocument &doc, std::string_view key, std::string_view name, SceneError &error) {

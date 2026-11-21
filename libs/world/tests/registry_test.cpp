@@ -22,11 +22,11 @@ namespace {
 }
 
 TEST(Registry, FindsComponentByName) {
-  auto transform = sdk::find_component("Transform");
+  auto transform = sdk::find_component("Transform2D");
 
   ASSERT_NE(transform, nullptr);
-  EXPECT_STREQ(transform->name, "Transform");
-  EXPECT_EQ(transform->size, sizeof(sdk::Transform));
+  EXPECT_STREQ(transform->name, "Transform2D");
+  EXPECT_EQ(transform->size, sizeof(sdk::Transform2D));
   EXPECT_EQ(transform->field_count, 3);
 }
 
@@ -37,13 +37,13 @@ TEST(Registry, UnknownNameIsNotFound) {
 }
 
 TEST(Registry, RecordsFieldNamesTypesAndOffsets) {
-  auto transform = sdk::find_component("Transform");
+  auto transform = sdk::find_component("Transform2D");
   ASSERT_NE(transform, nullptr);
 
   auto y = sdk::find_field(*transform, "y");
   ASSERT_NE(y, nullptr);
   EXPECT_EQ(y->type, sdk::FieldType::Float);
-  EXPECT_EQ(y->offset, offsetof(sdk::Transform, y));
+  EXPECT_EQ(y->offset, offsetof(sdk::Transform2D, y));
 
   auto health = sdk::find_component("Health");
   ASSERT_NE(health, nullptr);
@@ -57,8 +57,8 @@ TEST(Registry, RecordsFieldNamesTypesAndOffsets) {
 }
 
 TEST(Registry, OffsetsReachTheRightMember) {
-  sdk::Transform t{1.0f, 2.0f, 3.0f};
-  auto rotation = sdk::find_field(*sdk::component_info<sdk::Transform>(), "rotation");
+  sdk::Transform2D t{1.0f, 2.0f, 3.0f};
+  auto rotation = sdk::find_field(*sdk::component_info<sdk::Transform2D>(), "rotation");
   ASSERT_NE(rotation, nullptr);
 
   // what a tool does: walk to the field with only the registry to go on

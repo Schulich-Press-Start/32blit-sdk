@@ -34,7 +34,7 @@ Run the game yourself and connect a terminal, or let `blit dev` build and launch
 
 ```sh
 ./build/my-game --bridge 127.0.0.1:6132
-blit console --exec "set player.Transform.x 200" --exec "get player.Transform" --json
+blit console --exec "set player.Transform2D.x 200" --exec "get player.Transform2D" --json
 ```
 
 ```sh
@@ -45,7 +45,7 @@ Use the actual executable path (with `.exe` and, for multi-config generators, th
 
 `--scene` watches an SDK scene that your game reads through the attached `SceneRuntime`. The game still loads its initial scene in `init()`; the watcher sends `load_scene` after a save settles. It works with or without `--build-on-save`. Use `--scene-watch levels/props.scene` for each included file you also want to watch. These paths are relative to the project, use `/`, and cannot contain spaces. A valid save replaces the live scene without rebuilding or restarting; an invalid save reports `file:line` and leaves the current scene active. This does not convert Tiled files; it watches SDK scene files.
 
-`blit console` with no arguments opens a prompt. It also accepts `--script FILE` and `--watch player.Transform.x`. In addition to SDK actions, it supports `hello`, `list`, `components`, `get`, `snapshot`, `pause`, `step`, `resume`, and `stats`. `step` requires a paused game. `stats` reports the last update and render times in microseconds. With `-DBLIT_MEMORY_CAP_MB=64` (example budget), it also reports `live_bytes` and `peak_bytes` for the game's C++ allocations. This opt-in simulator cap does not measure total process RAM or allocations through C APIs. Native SDL logs combined update/render work over 16.6 ms.
+`blit console` with no arguments opens a prompt. It also accepts `--script FILE` and `--watch player.Transform2D.x`. In addition to SDK actions, it supports `hello`, `list`, `components`, `get`, `snapshot`, `pause`, `step`, `resume`, and `stats`. `step` requires a paused game. `stats` reports the last update and render times in microseconds. With `-DBLIT_MEMORY_CAP_MB=64` (example budget), it also reports `live_bytes` and `peak_bytes` for the game's C++ allocations. This opt-in simulator cap does not measure total process RAM or allocations through C APIs. Native SDL logs combined update/render work over 16.6 ms.
 
 The protocol is UTF-8 JSON Lines on IPv4 loopback only. The game accepts two clients and processes at most one command per simulation poll. Frames are capped at 1 MiB, and log notifications are best-effort. The native tools do not start an HTTP server or implement browser reload.
 
@@ -66,10 +66,12 @@ The schema explicitly maps object classes to registered fields. For example, a T
 
 ```json
 {"version":1,"classes":{"PlayerSpawn":{"shape":"point","prefab":"pilot",
-  "fields":{"Transform.x":"$x","Transform.y":"$y"}}}}
+  "fields":{"Transform2D.x":"$x","Transform2D.y":"$y"}}}}
 ```
 
 Add `include generated/maps/level.generated.scene` to the authored level. Read the generated scene through `SceneReader`. When `blit::tiled_map_path(text)` returns a path, validate it under the project and read the complete packed file into `blit::load_tiled_map(bytes, size)`. Stage the resulting `Map`; use `SceneReader::finish` to publish it only on a successful scene load. Use `Map::layer_order` when drawing in Tiled order. Ship the generated scene and the `.map` file it names alongside the authored data, and ignore `generated/` in version control. To clean up old content-addressed map files, stop the game, remove the generated directory, then rebuild.
+
+The importer also records the project-relative atlas path and transparency color in a `# blit-atlas` comment. It is not needed by the game. The native editor works directly with the SDK's BTMP files and does not invoke this importer.
 
 ```sh
 blit import maps/level.tmx --schema authoring.schema.json --registry build/registry.json

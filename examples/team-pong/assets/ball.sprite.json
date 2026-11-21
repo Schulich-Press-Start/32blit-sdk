@@ -1,0 +1,10 @@
+{
+  "image": "assets/actors.png",
+  "frame_width": 8,
+  "frame_height": 8,
+  "clips": {
+    "spin": {"loop": true, "frames": [
+      {"cell": 2, "duration_ms": 100}, {"cell": 3, "duration_ms": 100}
+    ]}
+  }
+}

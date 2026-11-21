@@ -49,11 +49,14 @@ namespace blit {
     bool has_flag(blit::Point p, uint8_t f);
 
     void tiles_in_rect(blit::Rect r, std::function<void(blit::Point)> f);
+    bool set_tile(const std::string &layer, Point cell, uint8_t tile, uint8_t transform = 0);
 
   };
 
   // Decodes a complete BTMP v1 asset; returns nullptr for malformed data.
   std::unique_ptr<Map> load_tiled_map(const uint8_t *data, std::size_t size);
+  // Serialize native BTMP layers in draw order. Empty on invalid input.
+  std::vector<uint8_t> write_map(const Map &map);
 
   // Extracts the second-line marker from a generated Tiled scene. The view
   // borrows the scene text; the caller must validate and resolve the path.

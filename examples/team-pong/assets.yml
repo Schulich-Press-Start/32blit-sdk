@@ -1,0 +1,3 @@
+assets.cpp:
+  assets/court.png: packed_court
+  assets/actors.png: packed_actors

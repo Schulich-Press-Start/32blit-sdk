@@ -8,8 +8,8 @@
  * scene files.
  *
  * ```cpp
- * struct Transform { float x, y, rotation; };
- * SDK_COMPONENT(Transform, x, y, rotation);
+ * struct Transform2D { float x, y, rotation; };
+ * SDK_COMPONENT(Transform2D, x, y, rotation);
  * ```
  *
  * Registration happens before main(), into a fixed array that needs no
@@ -33,7 +33,14 @@ namespace sdk {
   constexpr int string_field_size = 24;
 
   struct Name { char value[string_field_size] = {}; };
-  struct Transform { float x = 0, y = 0, rotation = 0; };
+  struct Transform2D { float x = 0, y = 0, rotation = 0; };
+  // Axis-aligned box in world pixels relative to Transform2D; nonpositive dimensions disable it.
+  struct BoxCollider2D { float offset_x = 0, offset_y = 0, width = 8, height = 8; };
+  // Project-relative sprite descriptor stem (without .sprite.json) and optional clip name.
+  struct Sprite {
+    char asset[string_field_size] = {}, clip[string_field_size] = {};
+    float offset_x = 0, offset_y = 0;
+  };
   struct Entity;
 
   /** \brief The types a component field may have. */
@@ -179,7 +186,7 @@ namespace sdk {
  * \brief Register a component type and its fields.
  *
  * Write it once, at namespace scope, in the source file that defines the
- * struct: `SDK_COMPONENT(Transform, x, y, rotation);`. Up to
+ * struct: `SDK_COMPONENT(Transform2D, x, y, rotation);`. Up to
  * sdk::max_component_fields fields, each of a type sdk::FieldType covers.
  */
 #define SDK_COMPONENT(T, ...)                                                                  \

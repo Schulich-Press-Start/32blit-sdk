@@ -107,6 +107,7 @@ namespace sdk {
                          size_t binding_count, SceneError &error) {
       if(doc.sources().empty()) return scene_error(error, {}, 0, "no scene document");
       const std::string_view root = doc.sources()[0].path;
+      if(doc.uses_external_metadata()) return scene_error(error, root, 0, "scene must be parsed with the runtime component registry");
       if(SceneAccess::querying(world)) return scene_error(error, root, 0, "cannot load during a query");
       if(binding_count < doc.objects().size() || (!bindings && !doc.objects().empty()))
         return scene_error(error, root, 0, "scene binding buffer too small");
@@ -263,6 +264,8 @@ namespace sdk {
     std::swap(title_, other.title_);
     std::swap(snapshot_source_, other.snapshot_source_);
     std::swap(snapshot_, other.snapshot_);
+    std::swap(types_, other.types_);
+    std::swap(type_count_, other.type_count_);
     sources_.swap(other.sources_);
     objects_.swap(other.objects_);
     components_.swap(other.components_);
@@ -341,7 +344,7 @@ namespace sdk {
       object_error(active_, object, object.line, error, "cannot create entity");
       return {};
     }
-    const auto *transform_type = component_info<Transform>();
+    const auto *transform_type = component_info<Transform2D>();
     bool possible = transform_type && SceneAccess::room_for(world_, transform_type->id, 1, false);
     visit_components(active_, object, [&](const SceneComponent &component) {
       if(possible && component.type != transform_type->id)
@@ -356,7 +359,7 @@ namespace sdk {
     const auto entity = world_.create();
     if(!entity) std::terminate();
     apply_components(world_, entity, active_, object, bindings_.data());
-    auto *transform = world_.add<Transform>(entity);
+    auto *transform = world_.add<Transform2D>(entity);
     if(!transform) std::terminate();
     transform->x = x;
     transform->y = y;
