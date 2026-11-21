@@ -3,6 +3,7 @@
 #include "paddle.hpp"
 #include "scene.hpp"
 #include "sprite_render.hpp"
+#include "tileset_descriptor.hpp"
 #ifdef BLIT_DEV_BRIDGE
 #include "bridge.hpp"
 #endif
@@ -87,6 +88,21 @@ bool read_scene_source(void *, std::string_view path, std::string_view &text) {
     std::fprintf(stderr, "%s: cannot read native map\n", map_path);
     return false;
   }
+  std::ifstream link(std::string(map_path) + ".json");
+  const auto association = nlohmann::json::parse(link, nullptr, false);
+  if(!association.is_object() || !association.contains("tileset") || association["tileset"] != "assets/court.tileset.json") {
+    std::fprintf(stderr, "%s.json: expected the Pong court tileset association\n", map_path);
+    return false;
+  }
+  std::ifstream tileset_file("assets/court.tileset.json");
+  sdk::TilesetDescriptor tileset;
+  if(sdk::read_tileset_descriptor(nlohmann::json::parse(tileset_file, nullptr, false), tileset) ||
+     tileset.image != "assets/court.png" ||
+     !atlas_tile_count(court_sheet->bounds.w, court_sheet->bounds.h, tileset.tile_size) ||
+     !staged_art.court->set_tile_size(tileset.tile_size)) {
+    std::fprintf(stderr, "assets/court.tileset.json: invalid packed court geometry\n");
+    return false;
+  }
   return read_clips("assets/paddle.sprite.json", "assets/paddles.png", *paddle_sheet, staged_art.paddle) &&
          read_clips("assets/ball.sprite.json", "assets/ball.png", *ball_sheet, staged_art.ball);
 }
@@ -113,17 +129,8 @@ Box bounds(const Transform2D &pos, const BoxCollider2D &box) {
 float center_y(Box box) { return (box.top + box.bottom) * 0.5f; }
 
 void draw_court(Map &map) {
-  for (const auto &name : map.layer_order) {
-    auto &layer = map.layers.at(name);
-    for (int y = 0; y < std::min(map.bounds.h, height / 8); ++y) {
-      for (int x = 0; x < std::min(map.bounds.w, width / 8); ++x) {
-        const Point cell(x, y);
-        const auto id = layer.tile_at(cell);
-        if (id && id <= (court_sheet->bounds.w / 8) * (court_sheet->bounds.h / 8))
-          screen.sprite(id - 1, Point(x * 8, y * 8), layer.transform_at(cell));
-      }
-    }
-  }
+  for(const auto &name : map.layer_order)
+    map.layers.at(name).draw(screen, *court_sheet, Rect(0, 0, width, height));
 }
 } // namespace
 
@@ -140,7 +147,6 @@ void init() {
   paddle_sheet.reset(Surface::load(packed_paddles));
   ball_sheet.reset(Surface::load(packed_ball));
   if (!court_sheet || !paddle_sheet || !ball_sheet) return;
-  screen.sprites = court_sheet.get();
   sdk::SceneError error;
   if (!scenes.load(scene_path, error))
     std::fprintf(stderr, "%s:%u: %s\n", error.file, error.line, error.message);

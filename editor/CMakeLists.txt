@@ -95,6 +95,8 @@ else()
 endif()
 
 if(WIN32)
+  enable_language(RC)
+  target_sources(32blit-editor PRIVATE editor.rc)
   target_link_libraries(32blit-editor PRIVATE ws2_32 comdlg32)
   get_target_property(editor_sdl_type ${editor_sdl} TYPE)
   if(editor_sdl_type STREQUAL "SHARED_LIBRARY")

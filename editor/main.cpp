@@ -351,7 +351,19 @@ namespace editor {
           case Workspace::ToolsPanel: draw_tools(); break;
 #endif
           case Workspace::FilesPanel:
-            if(documents_.draw_files() && !route_asset_request()) workspace_.show(Workspace::DocumentPanel);
+            if(documents_.draw_files([this](const fs::path &file) {
+              const auto matches = [&](std::string_view relative) {
+                if(relative.empty()) return false;
+                std::error_code error;
+                return fs::equivalent(file, project_.root() / fs::u8path(relative), error);
+              };
+              if(matches("blit-project.json") || matches(project_.registry()) || matches(project_.scene())) return true;
+              if(tilesets_.uses_file(matches) || sprites_.uses_file(matches)) return true;
+              for(const auto &view : scenes_)
+                if(matches(view->path()) || matches(view->file_path(true)) || matches(view->file_path(true) + ".json") ||
+                   matches(view->tileset_path())) return true;
+              return false;
+            }) && !route_asset_request()) workspace_.show(Workspace::DocumentPanel);
             break;
           case Workspace::PanelCount: break;
         }
@@ -640,9 +652,9 @@ namespace editor {
             }
             ImGui::EndMenu();
           }
-          if(project_.build_configured()) {
-            if(ImGui::MenuItem("Play", nullptr, false, can_start)) start_game(false);
-            if(ImGui::MenuItem("Dev", nullptr, false, can_start)) start_game(true);
+          if(project_.play_configured() || project_.build_configured()) {
+            if(project_.play_configured() && ImGui::MenuItem("Play", nullptr, false, can_start)) start_game(false);
+            if(project_.build_configured() && ImGui::MenuItem("Dev", nullptr, false, can_start)) start_game(true);
             if(ImGui::MenuItem("Stop", nullptr, false, project_.active())) {
               project_.stop();
               auto_connect_ = false;
@@ -756,7 +768,7 @@ namespace editor {
       }
 
       void start_game(bool dev) {
-        auto_connect_ = true;
+        auto_connect_ = dev || !project_.packaged_play();
         project_.start(dev, address_);
       }
 
@@ -1016,7 +1028,8 @@ namespace editor {
           submit({Operation::Console, command_});
         }
         ImGui::EndDisabled();
-        if(!feedback_.empty()) ImGui::TextWrapped("%s", feedback_.c_str());
+        if(!feedback_.empty()) ImGui::InputTextMultiline("##console output", feedback_.data(), feedback_.size() + 1,
+                                                        ImGui::GetContentRegionAvail(), ImGuiInputTextFlags_ReadOnly);
       }
 #endif
 
@@ -1278,6 +1291,17 @@ namespace editor {
         std::fprintf(stderr, "Could not create editor window: %s\n", SDL_GetError());
         return 1;
       }
+#ifdef _WIN32
+      SDL_SysWMinfo info{};
+      SDL_VERSION(&info.version);
+      if(SDL_GetWindowWMInfo(window.get(), &info) && info.subsystem == SDL_SYSWM_WINDOWS) {
+        const auto icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101));
+        if(icon) {
+          SendMessageW(info.info.win.window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+          SendMessageW(info.info.win.window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
+        }
+      }
+#endif
 #ifndef __EMSCRIPTEN__
       SDL_SetWindowMinimumSize(window.get(), 600, 400);
 #endif

@@ -1,6 +1,7 @@
 #include "project.hpp"
 #ifndef __EMSCRIPTEN__
 #include <imgui.h>
+#include <cfloat>
 #endif
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -55,7 +56,14 @@ namespace editor {
 #else
     const auto platform = config.find("linux");
 #endif
-    if(platform != config.end()) {
+    if(platform != config.end() && !platform->is_object())
+      throw std::runtime_error("Expected a platform settings object.");
+#ifdef _WIN32
+    if(platform != config.end() && platform->contains("play_exe"))
+      play_exe_ = get_path(*platform, "play_exe");
+#endif
+    if(platform != config.end() && (play_exe_.empty() || platform->contains("preset") ||
+                                    platform->contains("build_dir") || platform->contains("exe"))) {
       preset_ = get_text(*platform, "preset");
       build_ = get_path(*platform, "build_dir");
       exe_ = get_path(*platform, "exe");
@@ -77,16 +85,20 @@ namespace editor {
   bool Project::running() const { return phase_ == Phase::Play || (phase_ == Phase::Dev && ready_); }
 
   void Project::start(bool dev, const std::string &address) {
-    if(!build_configured() || active()) return;
+    if(active() || !(dev ? build_configured() : play_configured())) return;
     dev_ = dev;
     configure_only_ = false;
     ready_ = false;
     address_ = address;
     log_.clear();
     try {
-      const auto cache = root_ / fs::u8path(build_) / "CMakeCache.txt";
-      if(fs::is_regular_file(cache)) build_or_watch();
-      else configure();
+      if(!dev && !play_exe_.empty()) {
+        launch_play(play_exe_, "Playing (packaged game)");
+      } else if(dev && fs::is_regular_file(root_ / fs::u8path(build_) / "CMakeCache.txt")) {
+        build_or_watch();
+      } else {
+        configure();
+      }
     } catch(const std::exception &error) { status_ = error.what(); }
   }
 
@@ -133,6 +145,14 @@ namespace editor {
     }
   }
 
+  void Project::launch_play(const std::string &exe, const char *status) {
+    std::vector<std::string> args{(root_ / fs::u8path(exe)).u8string()};
+    if(play_exe_.empty()) args.insert(args.end(), {"--bridge", address_});
+    process_.start(root_, args);
+    phase_ = Phase::Play;
+    status_ = status;
+  }
+
   void Project::tick() {
     if(!active()) return;
     auto text = process_.read_log();
@@ -154,9 +174,7 @@ namespace editor {
         if(configure_only_) status_ = "Configured";
         else build_or_watch();
       } else if(previous == Phase::Build) {
-        process_.start(root_, {(root_ / fs::u8path(exe_)).u8string(), "--bridge", address_});
-        phase_ = Phase::Play;
-        status_ = "Playing (fresh game)";
+        launch_play(exe_, "Playing (fresh game)");
       } else status_ = "Game exited";
     } catch(const std::exception &error) { status_ = error.what(); }
   }
@@ -167,13 +185,9 @@ namespace editor {
     status_ = "Stopped";
   }
 
-  void Project::draw_log() const {
-    if(ImGui::BeginChild("project log", ImVec2(0, 0), ImGuiChildFlags_Borders)) {
-      const bool at_end = ImGui::GetScrollY() >= ImGui::GetScrollMaxY();
-      ImGui::TextUnformatted(log_.data(), log_.data() + log_.size());
-      if(at_end) ImGui::SetScrollHereY(1.0f);
-    }
-    ImGui::EndChild();
+  void Project::draw_log() {
+    ImGui::InputTextMultiline("##project log", log_.data(), log_.size() + 1,
+                              ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly);
   }
 #endif
 }

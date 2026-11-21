@@ -22,6 +22,11 @@ namespace editor {
     bool active_dirty() const;
     bool playing() const;
     bool dirty() const;
+    bool uses_file(const std::function<bool(std::string_view)> &matches) const {
+      for(const auto &[path, tab] : tabs_)
+        if(matches(path) || matches(tab.descriptor.image)) return true;
+      return false;
+    }
     bool can_history(bool redo) const;
     void history(bool redo);
     void save(bool all);

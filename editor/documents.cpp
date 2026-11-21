@@ -11,6 +11,12 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace editor {
   namespace fs = std::filesystem;
@@ -101,6 +107,61 @@ namespace editor {
     bool skip_directory(std::string_view name) {
       return name == "build" || name.substr(0, 6) == "build-" || name.substr(0, 12) == "cmake-build-" ||
              name == "CMakeFiles" || name == "_deps" || name == "__pycache__";
+    }
+
+    bool plain_entry(const fs::path &path, fs::file_status status) {
+      if(!fs::is_directory(status) && !fs::is_regular_file(status)) return false;
+#ifdef _WIN32
+      // Junctions and mounted volumes can look like ordinary directories to symlink_status().
+      const auto attributes = GetFileAttributesW(path.c_str());
+      return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT);
+#else
+      (void)path;
+      return true;
+#endif
+    }
+
+    fs::file_status checked_entry(const fs::path &root, const fs::path &relative) {
+      if(root.empty() || relative.has_root_path() || fs::canonical(root) != root)
+        throw std::runtime_error("The path is outside the project.");
+      auto path = root;
+      auto status = fs::symlink_status(path);
+      if(!fs::is_directory(status) || !plain_entry(path, status))
+        throw std::runtime_error("The project root is not a regular directory.");
+      for(const auto &part : relative) {
+        if(part.empty() || part == "." || part == ".." || !fs::is_directory(status))
+          throw std::runtime_error("Invalid project path.");
+        path /= part;
+        status = fs::symlink_status(path);
+        if(!fs::exists(status)) throw std::runtime_error("A project entry no longer exists: " + path.u8string());
+        if(!plain_entry(path, status))
+          throw std::runtime_error("Links, junctions and special files are not supported: " + path.u8string());
+      }
+      return status;
+    }
+
+    struct FileOperationEntry {
+      fs::path relative;
+      bool directory;
+    };
+
+    std::vector<FileOperationEntry> collect_entries(const fs::path &root, const fs::path &relative) {
+      const auto directory = fs::is_directory(checked_entry(root, relative));
+      std::vector<FileOperationEntry> entries{{relative, directory}};
+      if(directory) {
+        for(const auto &entry : fs::recursive_directory_iterator(root / relative)) {
+          const auto status = entry.symlink_status();
+          if(!plain_entry(entry.path(), status))
+            throw std::runtime_error("Links, junctions and special files are not supported: " + entry.path().u8string());
+          entries.push_back({entry.path().lexically_relative(root), fs::is_directory(status)});
+        }
+      }
+      return entries;
+    }
+
+    void expect_kind(const fs::path &root, const FileOperationEntry &entry) {
+      if(fs::is_directory(checked_entry(root, entry.relative)) != entry.directory)
+        throw std::runtime_error("A project entry changed type: " + entry.relative.u8string());
     }
   }
 
@@ -414,7 +475,16 @@ namespace editor {
         continue;
       }
       std::error_code type_error;
-      if(!fs::is_regular_file(entry.symlink_status(type_error))) continue;
+      const auto status = entry.symlink_status(type_error);
+      if(type_error || !plain_entry(entry.path(), status)) {
+        it.disable_recursion_pending();
+        continue;
+      }
+      if(fs::is_directory(status)) {
+        // Keep empty folders selectable as paste targets. The trailing slash also marks the folder's range.
+        files_.push_back({entry.path().lexically_relative(root_).generic_u8string() + '/', false});
+        continue;
+      }
       const auto kind = file_kind(entry.path());
       if(kind != FileKind::Hidden)
         files_.push_back({entry.path().lexically_relative(root_).generic_u8string(), kind != FileKind::Asset});
@@ -423,15 +493,25 @@ namespace editor {
     if(error) browser_error_ = "Could not finish scanning project files: " + error.message();
   }
 
-  bool Documents::draw_files() {
+  bool Documents::draw_files(const std::function<bool(const fs::path &)> &is_asset_open) {
     if(root_.empty()) { ImGui::TextDisabled("Open the editor with --project to browse files."); return false; }
     if(ImGui::Button("Refresh files")) refresh_files();
+    if(!copied_path_.empty()) ImGui::TextWrapped("Copied: %s", copied_path_.c_str());
     if(files_.empty()) ImGui::TextDisabled("No project files found.");
     if(!browser_error_.empty()) ImGui::TextWrapped("%s", browser_error_.c_str());
     const auto padding = ImGui::GetStyle().FramePadding;
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(padding.x * .25f, padding.y));
-    const bool opened = draw_file_tree(0, files_.size(), 0);
+    const bool expanded = ImGui::TreeNodeEx("Project root", ImGuiTreeNodeFlags_DefaultOpen |
+      ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+    draw_file_actions("", true);
+    bool opened = false;
+    if(expanded) {
+      ImGui::TreePush("project-children");
+      opened = draw_file_tree(0, files_.size(), 0);
+      ImGui::TreePop();
+    }
     ImGui::PopStyleVar();
+    draw_file_operation(is_asset_open);
     return opened;
   }
 
@@ -445,8 +525,11 @@ namespace editor {
       auto end = i + 1;
       while(end < last && files_[end].path.compare(0, slash + 1, path, 0, slash + 1) == 0) ++end;
       ImGui::PushID(path.data() + offset, path.data() + slash);
-      if(ImGui::TreeNodeEx("folder", ImGuiTreeNodeFlags_SpanAvailWidth, "%.*s",
-                          static_cast<int>(slash - offset), path.data() + offset)) {
+      const bool expanded = ImGui::TreeNodeEx("folder", ImGuiTreeNodeFlags_SpanAvailWidth |
+        ImGuiTreeNodeFlags_NoTreePushOnOpen, "%.*s", static_cast<int>(slash - offset), path.data() + offset);
+      draw_file_actions(std::string_view(path).substr(0, slash), true);
+      if(expanded) {
+        ImGui::TreePush("children");
         opened |= draw_file_tree(i, end, slash + 1);
         ImGui::TreePop();
       }
@@ -457,17 +540,119 @@ namespace editor {
     ImGui::Indent(label_offset);
     for(auto i = first; i < last; ++i) {
       const auto &file = files_[i];
-      if(file.path.find('/', offset) != file.path.npos) continue;
+      if(offset == file.path.size() || file.path.find('/', offset) != file.path.npos) continue;
       const char *name = file.path.c_str() + offset;
-      if(!file.previewable) { ImGui::TextDisabled("%s", name); continue; }
-      if(ImGui::Selectable(name)) {
-        opened = open(file.path);
+      ImGui::PushID(name);
+      if(!file.previewable) ImGui::TextDisabled("%s", name);
+      else if(ImGui::Selectable(name)) {
+        opened |= open(file.path);
         browser_error_.swap(error_);
         error_.clear();
       }
+      draw_file_actions(file.path, false);
+      ImGui::PopID();
     }
     ImGui::Unindent(label_offset);
     return opened;
+  }
+
+  void Documents::draw_file_actions(std::string_view path, bool directory) {
+    if(!ImGui::BeginPopupContextItem("file-actions")) return;
+    if(!path.empty() && ImGui::MenuItem("Copy")) {
+      copied_path_.assign(path);
+      browser_error_.clear();
+    }
+    if(directory && ImGui::MenuItem("Paste", nullptr, false, !copied_path_.empty())) {
+      operation_path_.assign(path);
+      file_action_ = FileAction::Paste;
+    }
+    if(!path.empty() && ImGui::MenuItem("Delete...")) {
+      operation_path_.assign(path);
+      delete_directory_ = directory;
+      file_action_ = FileAction::ConfirmDelete;
+    }
+    ImGui::EndPopup();
+  }
+
+  void Documents::draw_file_operation(const std::function<bool(const fs::path &)> &is_asset_open) {
+    const auto action = std::exchange(file_action_, FileAction::None);
+    if(action == FileAction::ConfirmDelete) ImGui::OpenPopup("Delete Project Item");
+    bool confirmed = false;
+    if(ImGui::BeginPopupModal("Delete Project Item", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::TextWrapped("Permanently delete %s?", operation_path_.c_str());
+      if(delete_directory_) ImGui::TextWrapped("This includes all contents, even files not shown in the tree.");
+      if(ImGui::Button("Delete")) {
+        confirmed = true;
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+      ImGui::SetItemDefaultFocus();
+      ImGui::EndPopup();
+    }
+    if(action != FileAction::Paste && !confirmed) return;
+
+    std::string failure;
+    try {
+      if(confirmed) delete_file(is_asset_open);
+      else paste_file();
+    } catch(const std::exception &error) {
+      failure = std::string(confirmed ? "Could not finish deleting: " : "Could not finish pasting: ") + error.what();
+    }
+    // Always rescan: a filesystem error partway through an operation can leave changes on disk.
+    refresh_files();
+    if(!failure.empty()) browser_error_ = std::move(failure);
+  }
+
+  void Documents::paste_file() {
+    const auto source = fs::u8path(copied_path_);
+    const auto folder = fs::u8path(operation_path_);
+    if(source.empty() || !fs::is_directory(checked_entry(root_, folder)))
+      throw std::runtime_error("Choose a project folder to paste into.");
+    if(fs::is_directory(checked_entry(root_, source))) {
+      for(auto ancestor = folder; !ancestor.empty(); ancestor = ancestor.parent_path()) {
+        if(fs::equivalent(root_ / source, root_ / ancestor))
+          throw std::runtime_error("A folder cannot be pasted into itself or one of its subfolders.");
+      }
+    }
+    const auto source_parent = source.parent_path();
+    for(const auto &entry : collect_entries(root_, source)) {
+      expect_kind(root_, entry);
+      const auto destination = folder / entry.relative.lexically_relative(source_parent);
+      if(!fs::is_directory(checked_entry(root_, destination.parent_path())))
+        throw std::runtime_error("The paste folder is no longer available.");
+      const auto path = root_ / destination;
+      if(fs::exists(fs::symlink_status(path)) || !(entry.directory ? fs::create_directory(path) :
+                                                 fs::copy_file(root_ / entry.relative, path)))
+        throw std::runtime_error("The destination already exists: " + destination.u8string());
+    }
+  }
+
+  void Documents::delete_file(const std::function<bool(const fs::path &)> &is_asset_open) {
+    const auto relative = fs::u8path(operation_path_);
+    if(relative.empty()) throw std::runtime_error("The project root cannot be deleted.");
+    const auto entries = collect_entries(root_, relative);
+    if(entries.front().directory != delete_directory_)
+      throw std::runtime_error("The entry changed type. Refresh the file tree and try again.");
+    for(const auto &entry : entries) {
+      const auto path = root_ / entry.relative;
+      const bool open_document = !entry.directory && std::any_of(tabs_.begin(), tabs_.end(), [&](const Tab &tab) {
+        std::error_code error;
+        return fs::equivalent(path, root_ / fs::u8path(tab.path), error);
+      });
+      if(open_document || (is_asset_open && is_asset_open(path)))
+        throw std::runtime_error("Close the open document or asset first: " + entry.relative.u8string());
+    }
+    // Remove descendants explicitly, without following links or recursively removing any newly added files.
+    for(auto it = entries.rbegin(); it != entries.rend(); ++it) {
+      expect_kind(root_, *it);
+      if(!fs::remove(root_ / it->relative))
+        throw std::runtime_error("The entry has already been removed: " + it->relative.u8string());
+    }
+    if(!copied_path_.empty()) {
+      const auto copied = fs::u8path(copied_path_).lexically_relative(relative);
+      if(!copied.empty() && *copied.begin() != "..") copied_path_.clear();
+    }
   }
 
   std::string Documents::take_asset_request() {

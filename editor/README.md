@@ -34,15 +34,16 @@ Use **File → Save All**, then **Export Project ZIP**. The browser shows **Expo
 
 Pass the directory of a trusted project containing `blit-project.json`. Platformer ships an example with its desktop build and launch settings and startup scene. Have CMake on `PATH`; **Dev** also needs the installed `blit` CLI.
 
-- **Play** incrementally builds and launches a fresh Debug game. The editor connects automatically for inspection. No files are watched.
+- **Play** launches `windows.play_exe` when supplied in a Windows kit; otherwise it configures and incrementally builds a fresh Debug game. No files are watched.
 - **Dev** starts `blit dev` with build-on-save and watches the startup scene and its native map for reload. Select **Build / Game Log** from the **Tools** dropdown for build and reload messages.
-  The log fills its dock; drag the divider to give it more room.
-- **File → Reconfigure** runs the configured CMake preset without launching a game. Play and Dev configure automatically if the build folder has no CMake cache; otherwise they reuse the cache and let CMake's build rules regenerate when needed. Use Reconfigure after changing preset settings, or a separate build folder when switching generators.
+  Select and copy text from the Console or Build / Game Log. Drag the dock divider to give the output more room.
+- **File → Reconfigure** runs the configured CMake preset without launching a game. Use a separate build folder when switching generators.
 - **Stop** ends the editor-managed session. Close any independently launched watcher before using the same build folder with **Dev**.
 
 ## Arrange the editor
 
 **Project Files** shows relevant files in a collapsible tree rooted at the project. Open a `.scene` in **2D Viewport**; other supported text files open in **Documents**. **File → Open File…** uses the same routing. Hidden directories, common build folders, and unsupported extensions are skipped. Other assets are listed without a preview.
+  Right-click files or folders to **Copy**, **Paste** into a folder or the project root, or **Delete**. Paste never replaces an existing path. Deletion is permanent and requires confirmation; close affected assets before deleting them.
 
 **Documents** starts with `CMakeLists.txt`. Text tabs are editable and show line numbers, the active line, and the caret’s line and column. Press **Ctrl+S** or choose **File → Save Document**. Unsaved text is marked on the tab and included in **Save All**. If a file changed on disk after opening, save refuses to overwrite it. PNG previews are read-only. Opening a document or scene tab does not change the startup scene for Play.
 
@@ -95,7 +96,7 @@ The viewport, Tilesets palette, and PNG viewer all use `PreviewImage` for PNG de
 
 ### Create a tileset and tilemap
 
-1. Open **Tilesets → +**. Pick an image from **Project PNG** or use **Browse for PNG…** on Windows to choose an external image. The editor suggests the `.tileset.json` filename; accept it or change it. Atlases use 8 × 8 cells in 16 columns (128 pixels wide and 8–128 pixels tall). Tile ID 0 is reserved for empty cells, so the last cell of a 256-cell atlas is not addressable.
+1. Open **Tilesets → +** and choose a PNG. Set the square cell size in pixels; both PNG dimensions must divide evenly into that size. Existing tilesets without `tile_size` default to 8 px. There can be up to 255 usable cells (the last cell of a legacy 256-cell atlas is not addressable).
 2. Use **2D Viewport → + → New Tilemap**. Choose the map path, width and height in cells, and a tileset. This creates a native `.map` with an empty **Ground** layer and a `.map.json` sidecar that references the tileset. To put the map behind a scene, use the scene’s folder and basename.
 3. In **Tilesets**, click a tile to edit its flags and, if this is the active map’s tileset, select it as the brush. Flags such as `solid`, `ladder`, and `water` are saved in the `.tileset.json`, not copied into maps. Gameplay code decides how to use them; importing a tileset does not change existing game collision logic.
    Use **Settings → Tileset Properties** to define or delete flags for the entire tileset. Deleting a definition asks for confirmation and reports how many tiles will lose it. Use the selected tile’s checkboxes to assign or unassign flags without removing the definitions. Unchecked flags are omitted from the tile’s JSON. Changes reach the file on Save. **Settings** also contains the optional Transparent RGB color key.
@@ -104,7 +105,7 @@ The viewport, Tilesets palette, and PNG viewer all use `PreviewImage` for PNG de
 
 Drag empty viewport space to pan when painting is off. Middle-drag or hold **Shift** and left-drag to pan in either mode. Scroll to zoom around the cursor. **Frame** (**F** by default) centers the selected entity without changing zoom, and **Fit Screen** fits the game-size guide. Rebind framing and the drag modifier in **Shortcuts** for the current session.
 
-**View** contains **Grid**, **Grid px**, **Snap**, and the game-size guide settings. Grid spacing and snap are measured in world pixels. At low zoom, the editor skips grid lines to keep the display readable. Tile cells remain 8 × 8 regardless of these settings.
+**View** contains **Grid**, **Grid px**, **Snap**, and the game-size guide settings. Grid spacing and snap are measured in world pixels. In Paint mode the grid follows the tileset cell size.
 
 **Game Size** sets the guide width and height in game pixels for this open scene tab. It defaults to **320 × 240** (the standard hires size); use **160 × 120** for lores or enter the size requested by the game’s `set_screen_mode` call. The guide is anchored at `(0, 0)` and does not resize the running game or change its emulated panel.
 
@@ -128,7 +129,7 @@ The SDK scene and map codecs do not require SDL or a running World. A browser po
 
 For a new sprite, choose the PNG from the list and accept the suggested **Sprite file** (or give it a project-relative name such as `assets/player`). The editor adds `.sprite.json` to extensionless names and avoids suggesting an existing filename. **Create draft** opens the new asset; **File → Save Sprite** writes it.
 
-Open a `.sprite.json` from **Project Files**, or use **Sprites → +** to create a descriptor from a project PNG. **Sheet settings** lets you pick the PNG and set **Frame size (px)** to a grid that divides the sheet, with each dimension a multiple of 8. The cell picker shows the whole source PNG; use a cropped sheet to see only one character’s frames. Pick a cell, name a clip, then append, replace, reorder, or remove its frames. Set **Duration (ms)** for the selected frame, or click **Set all** to copy its duration to every frame in that clip as one edit. Use **Ctrl+Z** to undo and **Ctrl+Shift+Z** to redo when not typing in a field. Use **Play**, **Pause**, and **Restart**; uncheck **Loop** to stop on the final frame.
+In **Sprites → Sheet settings**, choose rectangular frame dimensions from 1 to 2048 px. The grid must divide the sheet exactly. Pick cells, name clips, and use the frame list to reorder frames and edit their durations. **Set all** applies one duration to the clip; **Ctrl+Z** and **Ctrl+Shift+Z** undo and redo outside text fields.
 
 **File → Save Sprite** writes frame order, durations, and loop settings, not PNG pixels. The browser exports the same descriptor. Platformer uses `Transform2D` and `Sprite` to render its actors from packed artwork. Gameplay still chooses movement, facing, and state-based animation. In a native project manifest, optional `scene_watch` paths let **Dev** reload game-authored dependencies such as sprite descriptors.
 

@@ -2,6 +2,7 @@
 #include "preview_image.hpp"
 #include <filesystem>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,7 +16,8 @@ namespace editor {
     bool active_dirty() const;
     void save(bool all);
     void request_open() { open_requested_ = true; }
-    bool draw_files();
+    // Return true for any absolute path that must not be deleted while an asset is open.
+    bool draw_files(const std::function<bool(const std::filesystem::path &)> &is_asset_open);
     std::string take_asset_request();
     void refresh_files();
     std::vector<std::string> tilesets() const;
@@ -38,6 +40,10 @@ namespace editor {
     void draw_close_prompt();
     bool open(const std::string &path);
     bool draw_file_tree(std::size_t first, std::size_t last, std::size_t offset);
+    void draw_file_actions(std::string_view path, bool directory);
+    void draw_file_operation(const std::function<bool(const std::filesystem::path &)> &is_asset_open);
+    void paste_file();
+    void delete_file(const std::function<bool(const std::filesystem::path &)> &is_asset_open);
     std::filesystem::path root_;
     SDL_Renderer *renderer_;
     struct ProjectFile { std::string path; bool previewable; };
@@ -45,6 +51,10 @@ namespace editor {
     std::vector<Tab> tabs_;
     std::string selected_, active_, pending_close_, path_, error_, browser_error_;
     std::string asset_request_;
+    enum class FileAction { None, Paste, ConfirmDelete };
+    FileAction file_action_ = FileAction::None;
+    std::string copied_path_, operation_path_;
+    bool delete_directory_ = false;
     bool open_requested_ = false;
   };
 
