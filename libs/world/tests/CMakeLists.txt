@@ -21,6 +21,7 @@ add_executable(blit_world_tests
 	collision_query_test.cpp
 	grid_navigation_test.cpp
 	grid_route_test.cpp
+	grid_step_test.cpp
 	map_test.cpp
 	overlap_tracker_test.cpp
 	registry_test.cpp
