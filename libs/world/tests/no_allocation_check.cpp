@@ -13,8 +13,10 @@
 #include <new>
 
 #include "actions.hpp"
+#include "overlap_tracker.hpp"
 #include "registry.hpp"
 #include "scene.hpp"
+#include "tile_movement.hpp"
 #include "world.hpp"
 
 namespace {
@@ -58,6 +60,8 @@ int main() {
   sdk::World world(8);
   sdk::ComponentPool<sdk::Name> names(world, 4);
   sdk::ComponentPool<sdk::Transform2D> positions(world, 4);
+  sdk::ComponentPool<sdk::BoxCollider2D> boxes(world, 4);
+  sdk::OverlapTracker contacts(world);
   const sdk::SceneLimits scene_limits{8, 8, 16, 2};
   sdk::SceneRuntime scenes(world, scene_limits, {nullptr, read_scene_fixture});
   sdk::SceneDocument scratch(scene_limits);
@@ -98,6 +102,11 @@ int main() {
     if(!sdk::parse_console("destroy player", action, result) || !sdk::apply(world, action).ok || world.find("player")) return 4;
   }
 
+  sdk::Transform2D mover{4, 4};
+  const auto movement = sdk::move_against_tiles(mover, {}, blit::Vec2(72, 32), 6, 6, 16,
+    [](blit::Point cell) { return cell.x == 3; });
+  if(!movement.hit_x || movement.hit_y || movement.moved.x != 36 || movement.moved.y != 32) return 10;
+
   sdk::Action scene_action;
   sdk::Result scene_result;
   if(!sdk::parse_console("load_scene level.scene", scene_action, scene_result) ||
@@ -109,6 +118,23 @@ int main() {
   const int length = sdk::save_world(world, snapshot, sizeof(snapshot));
   if(length < 0 || !sdk::load_world(world, {snapshot, static_cast<size_t>(length)}, scratch,
                                     bindings, 8, error) || !world.find("pilot") || world.size() != 2) return 9;
+  const auto actor = world.find("pilot"), other = world.create();
+  world.add<sdk::BoxCollider2D>(actor);
+  world.add<sdk::BoxCollider2D>(other)->category = 31;
+  auto *position = world.add<sdk::Transform2D>(other);
+  if(!position) return 11;
+  const auto mask = sdk::collision_bit(31);
+  for(int tick = 0; tick < 1000; ++tick) {
+    position->x = 10;
+    const auto &events = contacts.update(actor, mask);
+    if(events.size() != 1 || events[0].phase != sdk::OverlapPhase::Enter) return 11;
+    contacts.update(actor);
+    position->x = 30;
+    const auto hit = sdk::sweep_entities(world, {9, 0, 17, 8}, blit::Vec2(26, 0), mask, actor);
+    if(hit.entity.index() != other.index() || hit.contact.fraction != 0.5) return 12;
+    contacts.update(actor);
+  }
+  contacts.reset();
 
   const int allocated = allocations - before;
 

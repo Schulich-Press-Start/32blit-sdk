@@ -43,6 +43,26 @@ namespace editor {
     }
   }
 
+  void TilePreview::append_layer(const std::string &name) {
+    if(name.empty() || name.size() > 255 || name.find_first_not_of(" \t") == name.npos ||
+       name.find("##") != name.npos || map_->layers.count(name))
+      throw std::runtime_error("Choose a unique layer name (1-255 bytes, without ##).");
+    const size_t cells = size_t(map_->bounds.w) * map_->bounds.h;
+    uint64_t bytes = 12 + (map_->layer_order.size() + 1) * (2 * uint64_t(cells) + 5) + name.size();
+    for(const auto &existing : map_->layer_order) bytes += existing.size();
+    if(bytes > 16 * 1024 * 1024 || map_->layers.size() >= 65535)
+      throw std::runtime_error("Another layer would exceed the map size limit.");
+    map_->layers.emplace(name, blit::MapLayer{map_.get(), name, std::vector<uint8_t>(cells), std::vector<uint8_t>(cells)});
+    map_->layer_order.push_back(name);
+    visible_.push_back(1);
+  }
+
+  void TilePreview::pop_layer() {
+    map_->layers.erase(map_->layer_order.back());
+    map_->layer_order.pop_back();
+    visible_.pop_back();
+  }
+
   void TilePreview::draw_layers(size_t &selected) {
     if(!error_.empty()) ImGui::TextWrapped("%s", error_.c_str());
     if(!map_) return;
@@ -81,7 +101,18 @@ namespace editor {
     } catch(const std::exception &failure) { error = failure.what(); return false; }
   }
 
-  void TilePreview::draw(ImDrawList &draw, ImVec2 top, ImVec2 bottom, double x, double y, double zoom) const {
+  void TilePreview::draw_layer(ImDrawList &draw, const blit::MapLayer &layer, ImVec2 top, ImVec2 bottom,
+                               double x, double y, double zoom) const {
+    this->draw(draw, top, bottom, x, y, zoom, &layer, nullptr);
+  }
+
+  void TilePreview::draw_property(ImDrawList &draw, const std::bitset<256> *property, ImVec2 top, ImVec2 bottom,
+                                  double x, double y, double zoom) const {
+    if(property && property->any()) this->draw(draw, top, bottom, x, y, zoom, nullptr, property);
+  }
+
+  void TilePreview::draw(ImDrawList &draw, ImVec2 top, ImVec2 bottom, double x, double y, double zoom,
+                         const blit::MapLayer *layer, const std::bitset<256> *property) const {
     if(!atlas_.texture) return;
     const ImVec2 center((top.x + bottom.x) * .5f, (top.y + bottom.y) * .5f);
     const auto pos = [&](double px, double py) {
@@ -97,22 +128,20 @@ namespace editor {
     const int first = cell(top.y - center.y, y, map_->bounds.h, false);
     const int last = cell(bottom.y - center.y, y, map_->bounds.h, true);
     if(left >= right || first >= last) return;
-    const int columns = atlas_.width / tile_size;
     const int tile_count = this->tile_count();
-    const auto texture = reinterpret_cast<ImTextureID>(atlas_.texture.get());
-    const float rw = 1.0f / atlas_.width, rh = 1.0f / atlas_.height;
-    for(size_t i = 0; i < visible_.size(); ++i) {
-      if(!visible_[i]) continue;
-      const auto &layer = map_->layers.at(map_->layer_order[i]);
+    if(layer) {
+      const int columns = atlas_.width / tile_size;
+      const auto texture = reinterpret_cast<ImTextureID>(atlas_.texture.get());
+      const float rw = 1.0f / atlas_.width, rh = 1.0f / atlas_.height;
       for(int row = first; row < last; ++row) {
         auto index = row * map_->bounds.w + left;
         for(int col = left; col < right; ++col, ++index) {
-          const int tile = int(layer.tiles[index]) - 1;
+          const int tile = int(layer->tiles[index]) - 1;
           if(tile < 0 || tile >= tile_count) continue;
           const auto a = pos(col * tile_size, row * tile_size);
           const auto b = pos((col + 1) * tile_size, (row + 1) * tile_size);
           const int sx = (tile % columns) * tile_size, sy = (tile / columns) * tile_size;
-          const auto transform = layer.transforms[index];
+          const auto transform = layer->transforms[index];
           // Same inverse sampling order as MapLayer::texture_span.
           const auto uv = [&](int u, int v) {
             if(transform & 2) v = tile_size - v;
@@ -124,6 +153,32 @@ namespace editor {
                             uv(0, 0), uv(tile_size, 0), uv(tile_size, tile_size), uv(0, tile_size));
         }
       }
+      return;
+    }
+    const auto matches = [&](int index) {
+      for(const auto &entry : map_->layers) {
+        const auto id = entry.second.tiles[index];
+        if(id && id <= tile_count && (*property)[id]) return true;
+      }
+      return false;
+    };
+    // Merge adjacent hits and draw each cell once, even if several layers qualify.
+    constexpr auto tint = IM_COL32(255, 164, 57, 120);
+    for(int row = first; row < last; ++row) {
+      const int base = row * map_->bounds.w;
+      const auto highlight = [&](int from, int to) {
+        draw.AddRectFilled(pos(from * tile_size, row * tile_size), pos(to * tile_size, (row + 1) * tile_size), tint);
+      };
+      int start = -1;
+      for(int col = left; col < right; ++col) {
+        if(matches(base + col)) {
+          if(start < 0) start = col;
+        } else if(start >= 0) {
+          highlight(start, col);
+          start = -1;
+        }
+      }
+      if(start >= 0) highlight(start, right);
     }
   }
 }

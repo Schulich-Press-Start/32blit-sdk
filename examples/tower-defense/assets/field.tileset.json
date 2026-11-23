@@ -1,0 +1,6 @@
+{
+  "image": "assets/field.png",
+  "tile_size": 16,
+  "properties": ["path", "buildable"],
+  "tiles": {"2": {"path": true}, "3": {"buildable": true}}
+}

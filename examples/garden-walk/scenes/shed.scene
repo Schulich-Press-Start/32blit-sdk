@@ -1,0 +1,17 @@
+scene 1 Shed
+entity player
+  Transform2D x=160 y=120
+  Sprite asset=assets/gardener clip=idle offset_x=-6 offset_y=-7
+  BoxCollider2D offset_x=-5 offset_y=-5 width=10 height=10
+entity garden_door
+  Transform2D x=160 y=200
+  Sprite asset=assets/door offset_x=-12 offset_y=-12
+  BoxCollider2D offset_x=-12 offset_y=-9 width=24 height=18 category=1
+  Door scene=scenes/main.scene arrival=from_shed
+entity from_garden
+  Transform2D x=160 y=170
+entity spare_arrival
+  Transform2D x=96 y=96
+entity camera
+  Transform2D x=160 y=120
+  Camera2D follow=null

@@ -7,6 +7,7 @@
 #endif
 
 #include "SDL.h"
+#include <cstdlib>
 #include <iostream>
 
 #ifndef __EMSCRIPTEN__
@@ -24,7 +25,6 @@
 #include "contrib.hpp"
 
 #ifdef BLIT_DEV_BRIDGE
-#include <cstdlib>
 #include "bridge.hpp"
 static int bridge_exit_status = 0;
 #endif
@@ -63,13 +63,16 @@ void handle_event(SDL_Event &event) {
 			running = false;
 			break;
 
-#ifdef __EMSCRIPTEN__
 		case SDL_WINDOWEVENT:
-			if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+			if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+				blit_input->handle_focus_lost();
+			}
+#ifdef __EMSCRIPTEN__
+			else if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
 				blit_renderer->resize(event.window.data1, event.window.data2);
 			}
-			break;
 #endif
+			break;
 
 		case SDL_MOUSEBUTTONUP:
 		case SDL_MOUSEBUTTONDOWN:
@@ -84,7 +87,7 @@ void handle_event(SDL_Event &event) {
 
 		case SDL_KEYDOWN: // fall-though
 		case SDL_KEYUP:
-			if (!blit_input->handle_keyboard(event.key.keysym.sym, event.type == SDL_KEYDOWN)) {
+			if (!blit_input->handle_keyboard(event.key.keysym, event.type == SDL_KEYDOWN)) {
 #ifdef VIDEO_CAPTURE
 				switch (event.key.keysym.sym) {
 				case SDLK_r:
@@ -100,7 +103,7 @@ void handle_event(SDL_Event &event) {
 
 		case SDL_CONTROLLERBUTTONDOWN:
 		case SDL_CONTROLLERBUTTONUP:
-			blit_input->handle_controller_button(event.cbutton.button, event.type == SDL_CONTROLLERBUTTONDOWN);
+			blit_input->handle_controller_button(event.cbutton.which, event.cbutton.button, event.type == SDL_CONTROLLERBUTTONDOWN);
 			break;
 
 		case SDL_CONTROLLERAXISMOTION:
@@ -383,12 +386,13 @@ int main(int argc, char *argv[]) {
 	delete blit_capture;
 #endif
 
-#ifdef BLIT_DEV_BRIDGE
+	// Do not tear down SDL or game globals while frozen user code may still be running.
 	if(!blit_system->stop()) std::_Exit(1);
+#ifdef BLIT_DEV_BRIDGE
 	sdk::dev_bridge::stop();
-#else
-	blit_system->stop();
 #endif
+	delete blit_audio;
+	blit_audio = nullptr;
 	delete blit_system;
   delete blit_input;
 	delete blit_multiplayer;

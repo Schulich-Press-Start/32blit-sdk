@@ -286,6 +286,7 @@ namespace sdk {
     SceneReadAttempt attempt{&reader_};
     if(!read_scene_file(staging_, path, reader_, error)) return false;
     if(staging_.snapshot()) return scene_error(error, path, 1, "expected an authored scene");
+    if(reader_.prepare && !reader_.prepare(reader_.context, staging_, error)) return false;
     if(!instantiate_scene(world_, staging_, staging_bindings_.data(), staging_bindings_.size(), error)) return false;
     active_.swap(staging_);
     bindings_.swap(staging_bindings_);
@@ -312,6 +313,7 @@ namespace sdk {
     if(new_catalogue) {
       if(!read_scene_file(staging_, source, reader_, error)) return false;
       if(staging_.snapshot()) return scene_error(error, source, 1, "expected an authored scene");
+      if(reader_.prepare && !reader_.prepare(reader_.context, staging_, error)) return false;
     }
     if(!instantiate_scene(world_, snapshot_, staging_bindings_.data(), staging_bindings_.size(), error)) return false;
     if(new_catalogue) active_.swap(staging_);

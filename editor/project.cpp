@@ -1,6 +1,7 @@
 #include "project.hpp"
 #ifndef __EMSCRIPTEN__
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <cfloat>
 #endif
 #include <nlohmann/json.hpp>
@@ -33,6 +34,15 @@ namespace editor {
     if(!input) throw std::runtime_error("Cannot open " + (root / "blit-project.json").u8string());
     const auto config = Json::parse(input);
     scene_ = get_path(config, "scene");
+    if(const auto categories = config.find("collision_categories"); categories != config.end()) {
+      if(!categories->is_array() || categories->size() > 32)
+        throw std::runtime_error("Expected a collision_categories array of up to 32 strings.");
+      for(const auto &entry : *categories) {
+        auto label = entry.get<std::string>();
+        if(label.find('\0') != label.npos) throw std::runtime_error("Invalid collision category label.");
+        collision_categories_.push_back(std::move(label));
+      }
+    }
 #ifdef __EMSCRIPTEN__
     if(!fs::is_regular_file(root / fs::u8path(scene_)))
       throw std::runtime_error("Missing startup scene: " + scene_);
@@ -61,8 +71,10 @@ namespace editor {
 #ifdef _WIN32
     if(platform != config.end() && platform->contains("play_exe"))
       play_exe_ = get_path(*platform, "play_exe");
+    if(platform != config.end() && platform->contains("preview_exe"))
+      preview_exe_ = get_path(*platform, "preview_exe");
 #endif
-    if(platform != config.end() && (play_exe_.empty() || platform->contains("preset") ||
+    if(platform != config.end() && ((!has_packaged_game() && !has_scene_preview()) || platform->contains("preset") ||
                                     platform->contains("build_dir") || platform->contains("exe"))) {
       preset_ = get_text(*platform, "preset");
       build_ = get_path(*platform, "build_dir");
@@ -84,20 +96,34 @@ namespace editor {
 #ifndef __EMSCRIPTEN__
   bool Project::running() const { return phase_ == Phase::Play || (phase_ == Phase::Dev && ready_); }
 
-  void Project::start(bool dev, const std::string &address) {
-    if(active() || !(dev ? build_configured() : play_configured())) return;
-    dev_ = dev;
+  bool Project::scene_preview_running() const {
+    return active() && phase_ == Phase::Play && mode_ == Launch::ScenePreview;
+  }
+
+  void Project::start(Launch mode, const std::string &address) {
+    if(active()) return;
+    mode_ = mode;
     configure_only_ = false;
     ready_ = false;
     address_ = address;
     log_.clear();
     try {
-      if(!dev && !play_exe_.empty()) {
-        launch_play(play_exe_, "Playing (packaged game)");
-      } else {
-        configure();
+      switch(mode) {
+        case Launch::ScenePreview: launch_play(preview_exe_, "Previewing saved scene (no custom C++)"); break;
+        case Launch::PackagedGame: launch_play(play_exe_, "Playing (packaged game)"); break;
+        case Launch::Build:
+        case Launch::Dev: configure(); break;
       }
     } catch(const std::exception &error) { status_ = error.what(); }
+  }
+
+  void Project::restart_scene_preview() {
+    if(!scene_preview_running()) return;
+    tick();
+    if(!scene_preview_running()) return;
+    stop();
+    start(Launch::ScenePreview, address_);
+    if(scene_preview_running()) status_ = "Preview restarted from saved scene";
   }
 
   void Project::configure() {
@@ -115,7 +141,7 @@ namespace editor {
   }
 
   void Project::build_or_watch() {
-    if(dev_) {
+    if(mode_ == Launch::Dev) {
       std::vector<std::string> args{"blit", "dev", "--build-dir", build_, "--target", target_, "--exe", exe_,
                                     "--connect", address_, "--build-on-save", "--scene", scene_};
       auto map = fs::u8path(scene_);
@@ -144,8 +170,14 @@ namespace editor {
   }
 
   void Project::launch_play(const std::string &exe, const char *status) {
-    std::vector<std::string> args{(root_ / fs::u8path(exe)).u8string()};
-    if(play_exe_.empty()) args.insert(args.end(), {"--bridge", address_});
+    const auto path = root_ / fs::u8path(exe);
+    if(!fs::is_regular_file(path)) {
+      if(mode_ == Launch::ScenePreview)
+        throw std::runtime_error("Missing scene preview: " + path.u8string() + ". Restore Runtime from SceneStarter or use Build & Run.");
+      throw std::runtime_error("Game executable not found: " + path.u8string());
+    }
+    std::vector<std::string> args{path.u8string()};
+    if(mode_ == Launch::Build) args.insert(args.end(), {"--bridge", address_});
     process_.start(root_, args);
     phase_ = Phase::Play;
     status_ = status;
@@ -184,8 +216,19 @@ namespace editor {
   }
 
   void Project::draw_log() {
+    auto *parent = ImGui::GetCurrentWindow();
+    const int child_index = parent->DC.ChildWindows.Size;
+    const auto id = ImGui::GetID("##project log");
     ImGui::InputTextMultiline("##project log", log_.data(), log_.size() + 1,
                               ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly);
+    if(child_index >= parent->DC.ChildWindows.Size) return;
+    // The pinned ImGui multiline input uses a scrolling child (including selection and copy).
+    auto *child = parent->DC.ChildWindows[child_index];
+    if(child->ChildId != id) return;
+    // ScrollMax is from the previously laid out text. Pin to the new end on the next frame
+    // only if the reader is still at that end; wheel/scrollbar changes take precedence.
+    if(child->ScrollTarget.y == FLT_MAX && child->Scroll.y >= child->ScrollMax.y - 1.0f)
+      ImGui::SetScrollY(child, float(log_.size()) * ImGui::GetTextLineHeight() + child->Size.y);
   }
 #endif
 }

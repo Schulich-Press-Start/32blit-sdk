@@ -303,10 +303,12 @@ static const blit::APIConst blit_api_const {
 };
 
 static blit::APIData blit_api_data;
+static blit::ActionInput current_action_input;
 
 namespace blit {
   const APIConst &api = blit_api_const;
   APIData &api_data = blit_api_data;
+  const ActionInput &action_input() { return current_action_input; }
 }
 
 // SDL events
@@ -436,6 +438,7 @@ int System::update_thread() {
 bool System::loop() {
   SDL_LockMutex(m_input);
   blit::buttons = shadow_buttons;
+  current_action_input = shadow_action_input;
   blit::tilt.x = shadow_tilt[0];
   blit::tilt.y = shadow_tilt[1];
   blit::tilt.z = shadow_tilt[2];
@@ -628,14 +631,34 @@ void System::set_tilt(int axis, float value) {
 	}
 }
 
-void System::set_button(int button, bool state) {
+void System::set_keyboard_button(SDL_Scancode key, int button, bool state) {
 	SDL_LockMutex(m_input);
+	if (key > SDL_SCANCODE_UNKNOWN && key < SDL_NUM_SCANCODES) {
+		shadow_action_input.keys.set(key, state);
+	}
+	set_button(button, state);
+	SDL_UnlockMutex(m_input);
+}
+
+void System::clear_action_keys() {
+	SDL_LockMutex(m_input);
+	shadow_action_input.keys.reset();
+	SDL_UnlockMutex(m_input);
+}
+
+void System::set_controller_buttons(uint32_t pad, int button, bool state) {
+	SDL_LockMutex(m_input);
+	shadow_action_input.pad = pad;
+	set_button(button, state);
+	SDL_UnlockMutex(m_input);
+}
+
+void System::set_button(int button, bool state) {
 	if (state) {
 		shadow_buttons |= button;
 	} else {
 		shadow_buttons &= ~button;
 	}
-	SDL_UnlockMutex(m_input);
 }
 
 bool System::stop() {

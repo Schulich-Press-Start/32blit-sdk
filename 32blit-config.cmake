@@ -3,33 +3,28 @@ if (NOT DEFINED BLIT_ONCE)
 
 	set(CMAKE_CXX_STANDARD 17)
 	set(CMAKE_CXX_EXTENSIONS OFF)
-	set(BLIT_MINIMUM_TOOLS_VERSION "0.7.3")
-
-	find_package(Python 3.6 REQUIRED)
-
-	# make sure that the tools are installed
-	execute_process(COMMAND ${Python_EXECUTABLE} -m ttblit version RESULT_VARIABLE VERSION_STATUS OUTPUT_VARIABLE TOOLS_VERSION ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-	if(${VERSION_STATUS})
-		# check for the executable if the module isn't found
-		find_program(32BLIT_TOOLS_EXECUTABLE 32blit)
-		if(32BLIT_TOOLS_EXECUTABLE)
-			# get the version
-			execute_process(COMMAND ${32BLIT_TOOLS_EXECUTABLE} version RESULT_VARIABLE VERSION_STATUS OUTPUT_VARIABLE TOOLS_VERSION ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+	# Scene projects read authored files directly. Keep the legacy package's
+	# tool discovery for existing callers, and for any packer used explicitly.
+	macro(_blit_require_tools)
+		if(NOT _blit_tools_checked)
+			find_package(Python 3.6 REQUIRED COMPONENTS Interpreter)
+			execute_process(COMMAND "${Python_EXECUTABLE}" -m ttblit version RESULT_VARIABLE tool_status OUTPUT_VARIABLE tool_version ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+			if(tool_status)
+				find_program(32BLIT_TOOLS_EXECUTABLE 32blit)
+				if(32BLIT_TOOLS_EXECUTABLE)
+					execute_process(COMMAND ${32BLIT_TOOLS_EXECUTABLE} version RESULT_VARIABLE tool_status OUTPUT_VARIABLE tool_version ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+				endif()
+			else()
+				set(32BLIT_TOOLS_EXECUTABLE "${Python_EXECUTABLE}" -m ttblit)
+			endif()
+			if(tool_status OR tool_version VERSION_LESS 0.7.3)
+				message(FATAL_ERROR "32blit tools >= 0.7.3 required. Install with: \"${Python_EXECUTABLE}\" -m pip install --upgrade 32blit \"bitstring<5\"")
+			endif()
+			set(_blit_tools_checked TRUE)
 		endif()
-	else()
-		set(32BLIT_TOOLS_EXECUTABLE ${Python_EXECUTABLE} -m ttblit)
-	endif()
-
-	# get just the python command to output to the user
-	get_filename_component(PYTHON_USER_EXECUTABLE "${Python_EXECUTABLE}" NAME)
-
-	if(${VERSION_STATUS})
-		message(FATAL_ERROR "32Blit tools not found!\nInstall with: ${PYTHON_USER_EXECUTABLE} -m pip install 32blit \"bitstring<5\"\n")
-	endif()
-
-	if("${TOOLS_VERSION}" VERSION_LESS "${BLIT_MINIMUM_TOOLS_VERSION}")
-		message(FATAL_ERROR "32Blit tools out of date!\nYou have ${TOOLS_VERSION}, we need >= ${BLIT_MINIMUM_TOOLS_VERSION}\nUpdate with: ${PYTHON_USER_EXECUTABLE} -m pip install --upgrade 32blit \"bitstring<5\"\n")
+	endmacro()
+	if(NOT "Scene" IN_LIST 32BLIT_FIND_COMPONENTS OR 32BLIT_HW OR PICO_SDK_PATH)
+		_blit_require_tools()
 	endif()
 
 	if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -53,6 +48,7 @@ if (NOT DEFINED BLIT_ONCE)
 	include("${CMAKE_CURRENT_LIST_DIR}/tools/blit-tools/Tiled.cmake")
 
 	function (blit_assets_yaml TARGET FILE)
+		_blit_require_tools()
 		# cause cmake to reconfigure whenever the asset list changes
 		set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${FILE})
 
@@ -158,4 +154,5 @@ if (NOT DEFINED BLIT_ONCE)
 	else()
 		add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/32blit-sdl 32blit-sdl)
 	endif()
+	include("${CMAKE_CURRENT_LIST_DIR}/libs/game_scene/SceneGame.cmake")
 endif ()

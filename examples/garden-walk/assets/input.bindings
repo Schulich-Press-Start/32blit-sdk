@@ -1,0 +1,24 @@
+# action device control — list an action again to add an alternative
+move_left keyboard A
+move_left keyboard Left
+move_left gamepad dpleft
+move_right keyboard D
+move_right keyboard Right
+move_right gamepad dpright
+move_up keyboard W
+move_up keyboard Up
+move_up gamepad dpup
+move_down keyboard S
+move_down keyboard Down
+move_down gamepad dpdown
+route keyboard Z
+route keyboard U
+route gamepad a
+menu keyboard Escape
+menu keyboard 2
+menu gamepad start
+ui_accept keyboard Return
+ui_accept keyboard Z
+ui_accept gamepad a
+ui_back keyboard X
+ui_back gamepad b

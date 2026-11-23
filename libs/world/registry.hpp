@@ -35,13 +35,35 @@ namespace sdk {
   struct Name { char value[string_field_size] = {}; };
   struct Transform2D { float x = 0, y = 0, rotation = 0; };
   // Axis-aligned box in world pixels relative to Transform2D; nonpositive dimensions disable it.
-  struct BoxCollider2D { float offset_x = 0, offset_y = 0, width = 8, height = 8; };
+  struct BoxCollider2D {
+    float offset_x = 0, offset_y = 0, width = 8, height = 8;
+    uint32_t category = 0;
+  };
   // Project-relative sprite descriptor stem (without .sprite.json) and optional clip name.
   struct Sprite {
     char asset[string_field_size] = {}, clip[string_field_size] = {};
     float offset_x = 0, offset_y = 0;
+    // Shared world draw order; smaller values draw nearer the front.
+    int32_t layer = 0;
   };
-  struct Entity;
+  /// Runtime handle. Only the issuing World accepts it; never persist it.
+  struct Entity {
+    Entity() = default;
+    uint32_t generation() const { return generation_; }
+    uint16_t index() const { return index_; }
+    explicit operator bool() const { return generation_ != 0; }
+
+  private:
+    friend class World;
+    Entity(uint32_t generation, uint16_t index, uint32_t world_id)
+      : generation_(generation), index_(index), world_id_(world_id) {}
+    uint32_t generation_ = 0;
+    uint16_t index_ = UINT16_MAX;
+    uint32_t world_id_ = 0;
+  };
+
+  /// View settings, used only when game code explicitly selects this camera.
+  struct Camera2D { bool clamp_to_map = true; Entity follow{}; };
 
   /** \brief The types a component field may have. */
   enum class FieldType : uint8_t {

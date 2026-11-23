@@ -3,6 +3,7 @@
 #include "scene.hpp"
 #include "sprite_clips.hpp"
 #include "tile_preview.hpp"
+#include "../libs/world/grid_route.hpp"
 #include <array>
 #include <map>
 #include <memory>
@@ -13,6 +14,7 @@
 #include <vector>
 
 namespace editor {
+  class Documents;
   class Project;
 
   struct MapDocument;
@@ -23,10 +25,10 @@ namespace editor {
 
   private:
     friend class ScenePreview;
-    void retire_atlas(TilePreview &preview);
+    void retire_image(PreviewImage image);
     std::filesystem::path root_;
     std::map<std::filesystem::path, std::shared_ptr<MapDocument>> documents_;
-    std::vector<PreviewImage> retired_atlases_;
+    std::vector<PreviewImage> retired_images_;
   };
 
   class ScenePreview {
@@ -49,7 +51,7 @@ namespace editor {
     std::string file_path(bool map) const;
     void revert_file(const Project &project, bool map);
     void draw_viewport(const Project &project, ImGuiKey frame_key, ImGuiKey pan_key);
-    void draw_objects(const Project &project, bool prefabs);
+    void draw_objects(const Project &project, bool prefabs, Documents &documents);
     void draw_layers(const Project &project);
     void invalidate_maps();
 
@@ -59,12 +61,17 @@ namespace editor {
     bool ready(const Project &project);
     void refresh_layers(const Project &project);
     void draw_add_object(bool prefab);
-    bool draw_add_component(uint32_t index, const sdk::ComponentInfo *chosen);
-    void draw_object(uint32_t index);
+    bool draw_add_component(const std::filesystem::path &root, Documents &documents, uint32_t index,
+                            const sdk::ComponentInfo *chosen);
+    void draw_object(const std::filesystem::path &root, Documents &documents, uint32_t index);
     const sdk::SceneObject *prefab_for(const sdk::SceneObject &object) const;
     void draw_canvas(const std::filesystem::path &root, bool frame_selection, bool frame_screen, ImGuiKey frame_key, ImGuiKey pan_key);
+    const std::bitset<256> *shown_tile_property() const;
+    bool can_validate_route() const;
+    void refresh_route();
     void refresh_markers();
     void move_marker(uint32_t object, double x, double y);
+    void place_sprite(std::string_view stem, float x, float y);
     void changed(bool ok, const sdk::SceneError &error);
     const char *paint_problem() const;
     void paint_cell(double x, double y);
@@ -73,6 +80,10 @@ namespace editor {
     const TilePreview &tiles() const;
     bool map_only_;
     bool show_grid_ = true;
+    bool show_route_ = false;
+    std::optional<std::array<uint64_t, 3>> route_revision_;
+    std::vector<sdk::RouteCell> route_cells_;
+    sdk::RouteIssue route_issue_{};
 
     struct Revision {
       std::unique_ptr<sdk::SceneDocument> document;
@@ -100,6 +111,7 @@ namespace editor {
     int grid_size_ = 8;
 
     nlohmann::json registry_; // Owns the names borrowed by the reflection records.
+    std::vector<std::string> collision_categories_;
     std::array<sdk::ComponentInfo, sdk::max_components> types_;
     std::array<std::array<sdk::FieldInfo, sdk::max_component_fields>, sdk::max_components> fields_;
     sdk::SceneDocument scene_{{}};
@@ -118,16 +130,53 @@ namespace editor {
     std::shared_ptr<MapDocument> map_;
     bool show_entities_ = true;
 
-    struct SpritePreview { sdk::SpriteClips descriptor; PreviewImage image; };
+    struct SpritePreview {
+      sdk::SpriteClips descriptor;
+      PreviewImage image;
+      std::filesystem::file_time_type modified{};
+      uintmax_t descriptor_size = 0;
+      const char *descriptor_error = nullptr;
+      int checked_frame = -1;
+      bool image_attempted = false;
+    };
+    SpritePreview &sprite_descriptor(const std::filesystem::path &root, std::string_view asset, bool inspect);
     const SpritePreview &sprite_preview(const std::filesystem::path &root, std::string_view asset);
     std::map<std::string, SpritePreview, std::less<>> sprite_previews_;
-    struct Marker { uint32_t object; float x, y; sdk::Sprite sprite{}; };
+    struct DoorSourceStamp {
+      std::filesystem::path file;
+      std::filesystem::file_time_type modified{};
+      uintmax_t size = uintmax_t(-1);
+      bool operator==(const DoorSourceStamp &other) const {
+        return file == other.file && modified == other.modified && size == other.size;
+      }
+    };
+    struct DoorDestination {
+      std::vector<std::pair<std::string, DoorSourceStamp>> sources;
+      std::vector<std::string> arrivals;
+      std::string error;
+      double next_check = 0;
+    };
+    const DoorDestination &door_destination(const std::filesystem::path &root, std::string_view path, bool refresh = false);
+    std::optional<std::string_view> draw_door_field(const std::filesystem::path &root, Documents &documents,
+                                                   bool scene_field, const char *value, const char *scene,
+                                                   bool editable);
+    std::map<std::string, DoorDestination, std::less<>> door_destinations_;
+    struct Marker { uint32_t object; float x, y; sdk::Sprite sprite{}; ImVec2 canvas_pos{}; bool sprite_drawn = false; };
     std::vector<Marker> markers_;
+    struct WorldDraw {
+      int32_t order;
+      size_t index;
+      const blit::MapLayer *tile;
+      ImTextureID texture{};
+      ImVec2 min{}, max{}, uv_min{}, uv_max{};
+    };
+    std::vector<WorldDraw> world_draw_;
     uint32_t selected_ = sdk::scene_end, dragging_ = sdk::scene_end;
     uint16_t transform_ = 0;
     uint8_t x_field_ = 0, y_field_ = 0;
     bool markers_dirty_ = true;
     double camera_x_ = 0, camera_y_ = 0, zoom_ = 0;
+    std::string shown_tile_property_;
     int screen_size_[2] = {320, 240};
     int screen_draft_[2]{};
     int pan_button_ = -1;

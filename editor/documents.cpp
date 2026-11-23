@@ -2,12 +2,15 @@
 #include "tabs.hpp"
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -83,6 +86,24 @@ namespace editor {
       constexpr std::string_view suffix = ".tileset.json";
       return name.size() > suffix.size() && name.substr(name.size() - suffix.size()) == suffix;
     }
+    bool is_audio_descriptor(std::string_view name) {
+      constexpr std::string_view suffix = ".audio.json";
+      return name.size() > suffix.size() && name.substr(name.size() - suffix.size()) == suffix;
+    }
+
+    bool is_relative_wav(std::string_view path) {
+      constexpr std::string_view suffix = ".wav";
+      if(path.size() <= suffix.size() || path.front() == '/' || path.find_first_of(":\\") != path.npos ||
+         !std::equal(suffix.begin(), suffix.end(), path.end() - suffix.size(),
+                     [](char a, unsigned char b) { return a == std::tolower(b); }) ||
+         std::any_of(path.begin(), path.end(), [](unsigned char c) { return c < ' ' || c == 127; })) return false;
+      for(auto slash = path.find('/'); slash != path.npos; slash = path.find('/')) {
+        if(path.substr(0, slash) == "..") return false;
+        path.remove_prefix(slash + 1);
+      }
+      return path.size() > suffix.size();
+    }
+
     enum class FileKind { Hidden, Text, Asset, Png, Viewport };
 
     FileKind file_kind(const fs::path &path) {
@@ -93,7 +114,7 @@ namespace editor {
       constexpr std::string_view text[] = {
         ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".cmake",
         ".scene", ".json", ".yaml", ".yml", ".toml",
-        ".ini", ".cfg", ".csv", ".lua", ".py", ".glsl", ".vert", ".frag", ".txt", ".md"
+        ".ini", ".cfg", ".bindings", ".csv", ".lua", ".py", ".glsl", ".vert", ".frag", ".txt", ".md"
       };
       constexpr std::string_view assets[] = {
         ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".svg", ".ase", ".aseprite",
@@ -168,7 +189,66 @@ namespace editor {
   Documents::Documents(const fs::path &root, SDL_Renderer *renderer) : root_(root), renderer_(renderer) {
     if(root_.empty()) return;
     open("CMakeLists.txt");
+    panel_request_.reset();
     refresh_files();
+  }
+
+  Documents::~Documents() {
+#ifndef __EMSCRIPTEN__
+    stop_audio();
+    if(audio_initialized_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+#endif
+  }
+
+  void Documents::AudioEditor::parse(const std::string &source) {
+    using Json = nlohmann::json;
+    const auto previous = selected < cues.size() ? cues[selected].first : std::string{};
+    needs_parse = false;
+    parse_error.clear();
+    cues.clear();
+    try {
+      std::set<std::string> ids;
+      const auto json = Json::parse(source, [&](int depth, Json::parse_event_t event, Json &value) {
+        if(depth == 1 && event == Json::parse_event_t::key && !ids.insert(value.get_ref<const std::string &>()).second)
+          throw std::runtime_error("Cue IDs must be unique.");
+        return true;
+      });
+      if(!json.is_object()) throw std::runtime_error("Expected a JSON object mapping cue IDs to WAV paths.");
+      cues.reserve(json.size());
+      for(auto item = json.begin(); item != json.end(); ++item) {
+        if(item.key().empty() || !item->is_string())
+          throw std::runtime_error("Each cue needs a non-empty ID and a WAV path string.");
+        cues.emplace_back(item.key(), item->get_ref<const std::string &>());
+      }
+    } catch(const std::exception &error) {
+      cues.clear();
+      parse_error = error.what();
+    }
+    if(cues.empty()) select(std::string::npos);
+    else {
+      const auto entry = std::find_if(cues.begin(), cues.end(), [&](const auto &cue) { return cue.first == previous; });
+      select(entry == cues.end() ? 0 : static_cast<std::size_t>(entry - cues.begin()));
+    }
+  }
+
+  void Documents::AudioEditor::select(std::size_t index) {
+    selected = index;
+    if(index < cues.size()) {
+      id = cues[index].first;
+      wav = cues[index].second;
+    } else {
+      id.clear();
+      wav.clear();
+    }
+    playback_error.clear();
+  }
+
+  void Documents::AudioEditor::write(std::string &source) const {
+    auto json = nlohmann::json::object();
+    for(const auto &[cue_id, path] : cues) json[cue_id] = path;
+    const bool trailing_newline = !source.empty() && source.back() == '\n';
+    source = json.dump(2);
+    if(trailing_newline) source += '\n';
   }
 
   void Documents::Tab::index_lines() {
@@ -185,16 +265,28 @@ namespace editor {
     column = ImTextCountCharsFromUtf8(content.data() + start[-1], content.data() + cursor) + 1;
   }
 
+  void Documents::Tab::content_changed() {
+    index_lines();
+    modified = !same_text(std::string_view(original).substr(bom ? utf8_bom.size() : 0), content);
+    if(!modified) save_error.clear();
+  }
+
   bool Documents::dirty() const {
     return std::any_of(tabs_.begin(), tabs_.end(), [](const Tab &tab) { return tab.modified; });
   }
 
-  bool Documents::active_dirty() const {
-    return std::any_of(tabs_.begin(), tabs_.end(), [&](const Tab &tab) { return tab.modified && tab.path == active_; });
+  bool Documents::active_dirty(Panel panel) const {
+    return std::any_of(tabs_.begin(), tabs_.end(), [&](const Tab &tab) {
+      return tab.modified && tab.path == panels_[panel].active;
+    });
   }
 
-  void Documents::save(bool all) {
-    for(auto &tab : tabs_) if(tab.modified && (all || tab.path == active_)) save(tab);
+  void Documents::save_active(Panel panel) {
+    for(auto &tab : tabs_) if(tab.modified && tab.path == panels_[panel].active) save(tab);
+  }
+
+  void Documents::save_all() {
+    for(auto &tab : tabs_) if(tab.modified) save(tab);
   }
 
   bool Documents::save(Tab &tab) {
@@ -276,7 +368,14 @@ namespace editor {
       return false;
     }
     error_.clear();
-    for(const auto &tab : tabs_) if(tab.path == key) { selected_ = key; return true; }
+    const auto panel = is_ui_layout(key) ? UI : is_audio_descriptor(key) ? Audio : Text;
+    const auto select = [&] {
+      panels_[panel].active = key;
+      panels_[panel].select = true;
+      panel_request_ = panel;
+      return true;
+    };
+    for(const auto &tab : tabs_) if(tab.path == key) return select();
     const auto size = in.tellg();
     Tab tab;
     tab.path = key;
@@ -308,21 +407,169 @@ namespace editor {
       }
       tab.content.append(text);
       tab.index_lines();
+      if(panel == UI) tab.ui.emplace();
+      else if(panel == Audio) tab.audio.emplace();
     }
     tabs_.push_back(std::move(tab));
-    selected_ = key;
-    return true;
+    return select();
   }
 
-  void Documents::draw_text(Tab &tab) {
+  void Documents::draw_document(Tab &tab) {
     ImGui::TextDisabled("%s", tab.path.c_str());
-    ImGui::SameLine();
+    if(!tab.ui) ImGui::SameLine();
     ImGui::BeginDisabled(!tab.modified);
     if(ImGui::SmallButton("Save")) save(tab);
     ImGui::EndDisabled();
+    if(tab.ui || tab.audio) {
+      ImGui::SameLine();
+      const char *visual = tab.audio ? "Show Cues" : "Show Preview";
+      if(ImGui::SmallButton(tab.show_source ? visual : "Show Text")) tab.show_source = !tab.show_source;
+    }
     if(!tab.save_error.empty()) ImGui::TextWrapped("%s", tab.save_error.c_str());
     ImGui::Separator();
 
+    if(tab.ui && !tab.show_source) {
+      if(tab.ui->draw(tab.content)) {
+        tab.content_changed();
+        tab.update_cursor(tab.cursor);
+      }
+    } else if(tab.audio && !tab.show_source) draw_audio(tab);
+    else draw_text(tab);
+  }
+
+  void Documents::draw_audio(Tab &tab) {
+    auto &audio = *tab.audio;
+    if(audio.needs_parse) audio.parse(tab.content);
+    if(!audio.parse_error.empty()) {
+      ImGui::TextWrapped("%s Select Show Text to fix the cue file.", audio.parse_error.c_str());
+      return;
+    }
+
+    if(ImGui::BeginCombo("Cue", audio.selected < audio.cues.size() ? audio.cues[audio.selected].first.c_str() : "New cue")) {
+      for(std::size_t i = 0; i < audio.cues.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        const bool selected = audio.selected == i;
+        if(ImGui::Selectable(audio.cues[i].first.c_str(), selected) && !selected) audio.select(i);
+        if(selected) ImGui::SetItemDefaultFocus();
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(audio.selected == std::string::npos);
+    if(ImGui::Button("New Cue")) audio.select(std::string::npos);
+    ImGui::EndDisabled();
+
+    ImGui::InputText("Cue ID", &audio.id);
+    ImGui::BeginDisabled(wav_paths_.empty());
+    if(ImGui::BeginCombo("WAV", audio.wav.empty() ? "Select a project WAV" : audio.wav.c_str(), ImGuiComboFlags_HeightLarge)) {
+      for(std::size_t i = 0; i < wav_paths_.size(); ++i) {
+        const auto &path = wav_paths_[i];
+        ImGui::PushID(static_cast<int>(i));
+        const bool selected = path == audio.wav;
+        if(ImGui::Selectable(path.c_str(), selected)) {
+          audio.wav = path;
+          audio.playback_error.clear();
+        }
+        if(selected) ImGui::SetItemDefaultFocus();
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    if(ImGui::SmallButton("Refresh WAV Files")) refresh_files();
+    if(!browser_error_.empty()) ImGui::TextWrapped("%s", browser_error_.c_str());
+    if(wav_paths_.empty()) ImGui::TextDisabled("No WAV files found in the project.");
+
+    const bool existing = audio.selected < audio.cues.size();
+    const bool valid_wav = is_relative_wav(audio.wav);
+    const bool id_changed = !existing || audio.id != audio.cues[audio.selected].first;
+    const bool id_in_use = id_changed && std::any_of(audio.cues.begin(), audio.cues.end(), [&](const auto &cue) {
+      return cue.first == audio.id;
+    });
+    if(id_in_use) ImGui::TextWrapped("That cue ID is already in use.");
+    if(!valid_wav && !audio.wav.empty()) ImGui::TextWrapped("Choose a project-relative .wav path.");
+
+#ifndef __EMSCRIPTEN__
+    ImGui::BeginDisabled(!valid_wav);
+    if(ImGui::Button("Play Preview")) audio.playback_error = play_audio(tab.path, audio.wav);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(audio_device_ == 0);
+    if(ImGui::Button("Stop")) stop_audio();
+    ImGui::EndDisabled();
+    if(!audio.playback_error.empty()) ImGui::TextWrapped("%s", audio.playback_error.c_str());
+#else
+    ImGui::TextDisabled("Audio preview is available in the desktop editor.");
+#endif
+
+    const bool changed = id_changed || audio.wav != audio.cues[audio.selected].second;
+    ImGui::BeginDisabled(!changed || audio.id.empty() || id_in_use || !valid_wav);
+    const bool apply = ImGui::Button(existing ? "Apply Changes" : "Add Cue");
+    ImGui::EndDisabled();
+    if(existing) ImGui::SameLine();
+    const bool remove = existing && ImGui::Button("Remove Cue");
+    if(apply) {
+      if(existing) {
+        auto &cue = audio.cues[audio.selected];
+        cue.first = audio.id;
+        cue.second = audio.wav;
+      } else {
+        audio.cues.emplace_back(audio.id, audio.wav);
+        audio.selected = audio.cues.size() - 1;
+      }
+    } else if(remove) {
+      audio.cues.erase(audio.cues.begin() + audio.selected);
+      audio.select(audio.cues.empty() ? std::string::npos : std::min(audio.selected, audio.cues.size() - 1));
+    }
+    if(apply || remove) {
+      audio.write(tab.content);
+      tab.content_changed();
+      tab.update_cursor(tab.cursor);
+    }
+  }
+
+#ifndef __EMSCRIPTEN__
+  std::string Documents::play_audio(const std::string &tab_path, const std::string &wav) {
+    stop_audio();
+    std::error_code error;
+    if(fs::canonical(root_, error) != root_ || error) return "Cannot resolve the project root.";
+    const auto path = project_file(root_, fs::u8path(wav));
+    if(path.empty()) return "WAV is missing or is not a regular file inside the project: " + wav;
+
+    SDL_AudioSpec spec{};
+    Uint8 *samples = nullptr;
+    Uint32 size = 0;
+    if(!SDL_LoadWAV(path.u8string().c_str(), &spec, &samples, &size))
+      return std::string("Could not load WAV: ") + SDL_GetError();
+    const std::unique_ptr<Uint8, decltype(&SDL_FreeWAV)> decoded(samples, SDL_FreeWAV);
+    if(size == 0) return "WAV contains no audio samples.";
+
+    if(!audio_initialized_) {
+      if(SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return std::string("Could not initialize audio: ") + SDL_GetError();
+      audio_initialized_ = true;
+    }
+    spec.samples = 1024;
+    // With no allowed changes SDL preserves the WAV format for queueing and converts for the device.
+    audio_device_ = SDL_OpenAudioDevice(nullptr, 0, &spec, nullptr, 0);
+    if(!audio_device_) return std::string("Could not open an audio device: ") + SDL_GetError();
+    if(SDL_QueueAudio(audio_device_, decoded.get(), size) != 0) {
+      const std::string message = SDL_GetError();
+      stop_audio();
+      return "Could not queue WAV: " + message;
+    }
+    playing_tab_ = tab_path;
+    SDL_PauseAudioDevice(audio_device_, 0);
+    return {};
+  }
+
+  void Documents::stop_audio() {
+    if(audio_device_) SDL_CloseAudioDevice(std::exchange(audio_device_, 0));
+    playing_tab_.clear();
+  }
+#endif
+
+  void Documents::draw_text(Tab &tab) {
     const auto &style = ImGui::GetStyle();
     const auto padding = style.FramePadding;
     const float row_height = ImGui::GetTextLineHeight();
@@ -346,9 +593,9 @@ namespace editor {
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
     if(edited) {
-      tab.index_lines();
-      tab.modified = !same_text(std::string_view(tab.original).substr(tab.bom ? utf8_bom.size() : 0), tab.content);
-      if(!tab.modified) tab.save_error.clear();
+      tab.content_changed();
+      if(tab.ui) tab.ui->invalidate();
+      if(tab.audio) tab.audio->needs_parse = true;
     }
     const auto *state = ImGui::GetInputTextState(id);
     const int cursor = state && (edited || ImGui::IsItemActive()) ? state->GetCursorPos() : tab.cursor;
@@ -410,14 +657,22 @@ namespace editor {
     }
   }
 
-  void Documents::draw() {
+  void Documents::draw(Panel panel) {
     if(root_.empty()) { ImGui::TextDisabled("Open the editor with --project to browse scene and source files."); return; }
-    if(tabs_.empty()) ImGui::TextDisabled("Open a file from Project Files or the File menu.");
-    const auto failed = std::find_if(tabs_.begin(), tabs_.end(), [&](const Tab &tab) { return tab.path != active_ && !tab.save_error.empty(); });
+    auto &state = panels_[panel];
+    const auto in_panel = [panel](const Tab &tab) { return tab.panel() == panel; };
+    if(std::none_of(tabs_.begin(), tabs_.end(), in_panel))
+      ImGui::TextDisabled("%s", panel == UI ? "Open a .ui.json file or choose File > New UI Layout."
+                               : panel == Audio ? "Open an .audio.json cue file from Project Files or the File menu."
+                                                : "Open a file from Project Files or the File menu.");
+    const auto failed = std::find_if(tabs_.begin(), tabs_.end(), [&](const Tab &tab) {
+      return in_panel(tab) && tab.path != state.active && !tab.save_error.empty();
+    });
     if(failed != tabs_.end()) ImGui::TextWrapped("Could not save %s: %s", failed->path.c_str(), failed->save_error.c_str());
     if(ImGui::BeginTabBar("documents", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_AutoSelectNewTabs)) {
       for(auto &tab : tabs_) {
-        ImGuiTabItemFlags flags = tab.path == selected_ ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        if(!in_panel(tab)) continue;
+        ImGuiTabItemFlags flags = state.select && tab.path == state.active ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
         if(tab.modified) flags |= ImGuiTabItemFlags_UnsavedDocument;
         const bool show = begin_tab(tab.label.c_str(), &tab.open, flags);
         if(!tab.open && tab.modified) {
@@ -426,7 +681,8 @@ namespace editor {
         }
         if(show) {
           if(tab.open) {
-            if(active_ != tab.path) active_ = tab.path;
+            if(tab.path == state.active) state.select = false;
+            else if(!state.select) state.active = tab.path;
             if(tab.image.texture) {
               ImGui::TextDisabled("%s  |  Read-only", tab.path.c_str());
               ImGui::Separator();
@@ -434,25 +690,36 @@ namespace editor {
               const float scale = std::min(1.0f, ImGui::GetContentRegionAvail().x / tab.image.width);
               if(scale > 0) ImGui::Image(reinterpret_cast<ImTextureID>(tab.image.texture.get()),
                                         {tab.image.width * scale, tab.image.height * scale});
-            } else draw_text(tab);
+            } else draw_document(tab);
           }
           ImGui::EndTabItem();
         }
       }
-      selected_.clear();
       ImGui::EndTabBar();
     }
-    draw_close_prompt();
+  }
+
+  void Documents::erase_closed_tabs() {
     tabs_.erase(std::remove_if(tabs_.begin(), tabs_.end(), [&](const Tab &tab) {
       if(tab.open) return false;
-      if(tab.path == active_) active_.clear();
+#ifndef __EMSCRIPTEN__
+      if(playing_tab_ == tab.path) stop_audio();
+#endif
+      auto &state = panels_[tab.panel()];
+      if(tab.path == state.active) state = {};
       return true;
     }), tabs_.end());
+  }
+
+  void Documents::draw_dialogs() {
+    draw_close_prompt();
+    erase_closed_tabs();
     if(open_requested_) {
       open_requested_ = false;
-      ImGui::OpenPopup("Open document");
+      error_.clear();
+      ImGui::OpenPopup("Open file");
     }
-    if(ImGui::BeginPopup("Open document")) {
+    if(ImGui::BeginPopup("Open file")) {
       if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
       const bool enter = ImGui::InputTextWithHint("##open path", "Project-relative path", &path_, ImGuiInputTextFlags_EnterReturnsTrue);
       if((ImGui::Button("Open") || enter) && open(path_)) ImGui::CloseCurrentPopup();
@@ -463,6 +730,9 @@ namespace editor {
 
   void Documents::refresh_files() {
     files_.clear();
+    sprite_stems_.clear();
+    scene_paths_.clear();
+    wav_paths_.clear();
     browser_error_.clear();
     if(root_.empty()) return;
     std::error_code error;
@@ -490,11 +760,23 @@ namespace editor {
         files_.push_back({entry.path().lexically_relative(root_).generic_u8string(), kind != FileKind::Asset});
     }
     std::sort(files_.begin(), files_.end(), [](const auto &a, const auto &b) { return a.path < b.path; });
+    constexpr std::string_view sprite_suffix = ".sprite.json";
+    constexpr std::string_view scene_suffix = ".scene";
+    for(const auto &file : files_) {
+      const std::string_view path = file.path;
+      if(path.size() > sprite_suffix.size() && path.substr(path.size() - sprite_suffix.size()) == sprite_suffix)
+        sprite_stems_.emplace_back(path.substr(0, path.size() - sprite_suffix.size()));
+      else if(path.size() > scene_suffix.size() && path.substr(path.size() - scene_suffix.size()) == scene_suffix &&
+              path.find_first_of("\\:") == path.npos &&
+              std::none_of(path.begin(), path.end(), [](unsigned char c) { return c < ' ' || c == 127; }))
+        scene_paths_.emplace_back(path);
+      if(is_relative_wav(path) && is_utf8_text(path)) wav_paths_.emplace_back(path);
+    }
     if(error) browser_error_ = "Could not finish scanning project files: " + error.message();
   }
 
-  bool Documents::draw_files(const std::function<bool(const fs::path &)> &is_asset_open) {
-    if(root_.empty()) { ImGui::TextDisabled("Open the editor with --project to browse files."); return false; }
+  void Documents::draw_files(const std::function<bool(const std::filesystem::path &)> &is_asset_open) {
+    if(root_.empty()) { ImGui::TextDisabled("Open the editor with --project to browse files."); return; }
     if(ImGui::Button("Refresh files")) refresh_files();
     if(!copied_path_.empty()) ImGui::TextWrapped("Copied: %s", copied_path_.c_str());
     if(files_.empty()) ImGui::TextDisabled("No project files found.");
@@ -504,19 +786,16 @@ namespace editor {
     const bool expanded = ImGui::TreeNodeEx("Project root", ImGuiTreeNodeFlags_DefaultOpen |
       ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
     draw_file_actions("", true);
-    bool opened = false;
     if(expanded) {
       ImGui::TreePush("project-children");
-      opened = draw_file_tree(0, files_.size(), 0);
+      draw_file_tree(0, files_.size(), 0);
       ImGui::TreePop();
     }
     ImGui::PopStyleVar();
     draw_file_operation(is_asset_open);
-    return opened;
   }
 
-  bool Documents::draw_file_tree(std::size_t first, std::size_t last, std::size_t offset) {
-    bool opened = false;
+  void Documents::draw_file_tree(std::size_t first, std::size_t last, std::size_t offset) {
     // Sorted paths sharing a folder prefix form a contiguous range.
     for(auto i = first; i < last;) {
       const auto &path = files_[i].path;
@@ -530,7 +809,7 @@ namespace editor {
       draw_file_actions(std::string_view(path).substr(0, slash), true);
       if(expanded) {
         ImGui::TreePush("children");
-        opened |= draw_file_tree(i, end, slash + 1);
+        draw_file_tree(i, end, slash + 1);
         ImGui::TreePop();
       }
       ImGui::PopID();
@@ -545,15 +824,24 @@ namespace editor {
       ImGui::PushID(name);
       if(!file.previewable) ImGui::TextDisabled("%s", name);
       else if(ImGui::Selectable(name)) {
-        opened |= open(file.path);
+        open(file.path);
         browser_error_.swap(error_);
         error_.clear();
+      }
+      constexpr std::string_view sprite_suffix = ".sprite.json";
+      const std::string_view path(file.path);
+      if(path.size() > sprite_suffix.size() && path.substr(path.size() - sprite_suffix.size()) == sprite_suffix) {
+        ImGui::SetItemTooltip("Drag into a scene to place this sprite.");
+        if(ImGui::BeginDragDropSource()) {
+          ImGui::SetDragDropPayload("BLIT_SPRITE_STEM", path.data(), path.size() - sprite_suffix.size(), ImGuiCond_Once);
+          ImGui::Text("Place %s", name);
+          ImGui::EndDragDropSource();
+        }
       }
       draw_file_actions(file.path, false);
       ImGui::PopID();
     }
     ImGui::Unindent(label_offset);
-    return opened;
   }
 
   void Documents::draw_file_actions(std::string_view path, bool directory) {
@@ -655,6 +943,10 @@ namespace editor {
     }
   }
 
+  std::optional<Documents::Panel> Documents::take_panel_request() {
+    return std::exchange(panel_request_, std::nullopt);
+  }
+
   std::string Documents::take_asset_request() {
     return std::exchange(asset_request_, {});
   }
@@ -669,31 +961,5 @@ namespace editor {
     std::vector<std::string> paths;
     for(const auto &file : files_) if(file_kind(fs::u8path(file.path)) == FileKind::Png) paths.push_back(file.path);
     return paths;
-  }
-
-  void workspace_style() {
-    auto &s = ImGui::GetStyle();
-    const ImVec4 ink{.16f,.20f,.23f,1}, muted{.35f,.40f,.43f,1}, paper{.98f,.97f,.94f,1};
-    const ImVec4 chrome{.88f,.89f,.86f,1}, line{.75f,.78f,.75f,1};
-    const ImVec4 accent{.24f,.45f,.40f,1}, hover{.77f,.87f,.82f,1};
-    s.WindowPadding = {10, 9};
-    s.FramePadding = {8, 5};
-    s.ItemSpacing = {7, 6};
-    s.WindowRounding = s.FrameRounding = s.TabRounding = 3;
-    s.WindowBorderSize = 1;
-    auto &c = s.Colors;
-    c[ImGuiCol_Text] = ink;
-    c[ImGuiCol_TextDisabled] = muted;
-    c[ImGuiCol_WindowBg] = c[ImGuiCol_PopupBg] = paper;
-    c[ImGuiCol_ChildBg] = paper;
-    c[ImGuiCol_MenuBarBg] = c[ImGuiCol_TitleBg] = c[ImGuiCol_TitleBgActive] = chrome;
-    c[ImGuiCol_Tab] = c[ImGuiCol_TabDimmed] = chrome;
-    c[ImGuiCol_TabSelected] = c[ImGuiCol_TabDimmedSelected] = hover;
-    c[ImGuiCol_Header] = c[ImGuiCol_FrameBg] = c[ImGuiCol_Button] = chrome;
-    c[ImGuiCol_HeaderHovered] = c[ImGuiCol_FrameBgHovered] = c[ImGuiCol_ButtonHovered] = c[ImGuiCol_TabHovered] = hover;
-    c[ImGuiCol_HeaderActive] = c[ImGuiCol_ButtonActive] = c[ImGuiCol_FrameBgActive] = hover;
-    c[ImGuiCol_TabSelectedOverline] = c[ImGuiCol_CheckMark] = c[ImGuiCol_NavHighlight] = accent;
-    c[ImGuiCol_Border] = c[ImGuiCol_Separator] = c[ImGuiCol_ScrollbarGrab] = line;
-    c[ImGuiCol_SeparatorHovered] = c[ImGuiCol_DockingPreview] = accent;
   }
 }

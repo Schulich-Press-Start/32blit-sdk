@@ -1,0 +1,29 @@
+# First developer handoff: two rooms and a collectible
+
+This is a pilot exercise, not a new template. Start from **File → New Project**, not Garden Walk. Ask the developer to note the first step where they need help, and separate editor friction from missing runtime features. Do not count a maintainer’s smoke run as an independent pilot.
+
+## Exercise
+
+1. Create a project in the Windows editor. Make two scenes, `scenes/main.scene` and `scenes/room.scene`. Give each a same-name tilemap and paint walls using a tile with the `solid` property. Import your own small player and collectible sprites. Place a named `player` with `Transform2D`, `Sprite`, and `BoxCollider2D` in each scene. **Play Scene** checks art and layout before adding custom components.
+2. **Build & Run** the generated game. Use [Garden Walk’s movement and door code](../examples/garden-walk/game.cpp) as a reference for adding walking and a door rule in your own `game.cpp`. The [Door declaration and registration](../examples/garden-walk/door.hpp) show what to register; include its [registration source](../examples/garden-walk/door.cpp) in the game and registry targets, following [the build recipe](../examples/garden-walk/CMakeLists.txt). Reopen the project after refreshing its component registry. Place a `Door` and `BoxCollider2D` on each doorway and select the destination scene and arrival marker. Put markers outside the return door area. Use **Build & Run**, not **Play Scene**, for the custom rules.
+3. Add one game-defined `Collectible` component, for example with an integer `points` field. In `update()`, test the player box against collectible boxes with `sdk::overlaps`. Award points and destroy the collected entity **after** the world query ends. Store the score in game code if it should survive travel; `travel` replaces scene entities. Add the registration source to both game and registry targets. Place a second collectible, change its value in the inspector, then save and run the same executable against the edited project. No new C++ should be needed for the second pickup.
+
+   `destroy()` removes a pickup only from the current runtime world. Re-entering its room reloads the authored pickup unless the game remembers what was collected. Check the score after collecting once in each room; preventing respawns is a separate game rule.
+4. Build and install Release with CMake. Share the whole installed `bin` folder with its DLLs and `data/`. Run it from an unrelated working directory to prove it uses the exported data. Follow the [standalone build instructions](scene-workshop/Building.md) for MSVC or UCRT64.
+
+**Pass:** The player cannot walk through a painted wall, can enter and return from the second room, can collect both items and see the correct score, and can run the standalone build without the editor. Record whether setup, authoring, component registration, runtime rules, or export required help.
+
+## What the current modules cover
+
+The core can render, animate, scroll, query tile properties, author reusable actors, detect box overlap, and load rooms. That’s enough to **write these kinds of games in C++ with editor-authored levels**, not to recreate every game through components alone or import its original project unchanged.
+
+| References | Already useful | Still game code or a missing reusable module |
+| --- | --- | --- |
+| [RiverRaider](https://github.com/lummi01/32Blit-RiverRaider), [Jetpac](https://github.com/mikerr/32blit-games/tree/master/jetpac) | Scrolling camera, layers, animated sprites, spawn and pickup placements | Flight, fuel, weapons and enemy rules; reusable movement or projectile helpers only if a second game needs them |
+| [Super Square Bros.](https://github.com/ThePythonator/Super-Square-Bros), [Miner Willy](https://github.com/mikerr/32blit-games/tree/master/willy), [Pitfall Harry](https://github.com/lummi01/32Blit-Pitfall-Harry) | Tile flags, collider shapes, camera, room transitions, checkpoints as authored placements | No generic platformer controller: one-way surfaces, slopes, ladders, moving or crumbling platforms need gameplay logic. Original Tiled data may need conversion. |
+| [GateKeeper](https://github.com/Blackhawk-TA/GateKeeper), [PacMan](https://github.com/lummi01/32Blit-PacMan) | Rooms, named arrivals, map semantics, animated actors and overlap | Dialogue, grid AI, mutable collectible state, combat and persistence policy |
+| lummi01’s [Asteroids](https://github.com/lummi01/32Blit-Asteroids), [Bounce](https://github.com/lummi01/32Blit-Bounce), [Indy500](https://github.com/lummi01/32Blit-Indy500) | Input, sprite drawing, viewports and named placements | The SDK has sound primitives, not an authored cue system. Steering, track bounds, projectile behavior, and scoring are game code. |
+| [TowerDefense](https://github.com/Blackhawk-TA/TowerDefense), [blit-boing](https://github.com/shane-powell/blit-boing) | Painted single lane and pads; clear overlap and input primitives | Tower-defense waves and combat; Boing bounce, feedback and game modes |
+| [Babble](https://github.com/Daft-Freak/32blit-babble), Gadgetoid’s [Rocks and Diamonds](https://github.com/Gadgetoid/rocks-and-diamonds-32blit), [Dots](https://github.com/Gadgetoid/32blit-dots), [Infinimap](https://github.com/Gadgetoid/32blit-infinimap) | Rendering, input and scenes | No puzzle-pack workflow, generic mutable-grid simulator, controller menu framework, or procedural-map authoring. Keep these separate from ordinary scene rendering. |
+
+Prioritize what the pilot repeats. If multiple developers rewrite the same collision or trigger code, extract that small helper. Do not add a wave editor or visual scripting to solve a one-game problem. Treat the external games as design references; audit code licenses and asset provenance separately before any reuse.

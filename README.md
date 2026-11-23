@@ -55,7 +55,9 @@ Refer to the OS/platform specific documentation files in the `docs/` folder for 
 
 To get started writing your own game, you should use the 32blit boilerplate - https://github.com/32blit/32blit-boilerplate/
 
-For a small game built around the scene editor and the World component system, follow the [Pong tutorial](docs/Pong.md).
+For an editor-first game, follow the [scene workshop](docs/PongStart.md): animate two coins and paint a tilemap without C++, build the same scene as a standalone executable, then program Pong. Scene games use `sdk::GameScene` and `blit_scene_game`; low-level games can continue to use `blit_executable` and draw directly.
+
+See the [scene editor roadmap](docs/EditorRoadmap.md) and [Garden Walk](examples/garden-walk/) for a top-down example with a scrolling camera and editor-authored collision tiles.
 
 ## Help & Support
 

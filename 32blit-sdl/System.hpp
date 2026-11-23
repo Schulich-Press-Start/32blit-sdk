@@ -1,3 +1,5 @@
+#include "ActionInput.hpp"
+
 class System {
 	public:
 		static const Uint32 timer_event;
@@ -39,9 +41,12 @@ class System {
 
 		void set_joystick(int axis, float value);
 		void set_tilt(int axis, float value);
-		void set_button(int button, bool state);
+		void set_keyboard_button(SDL_Scancode key, int button, bool state);
+		void clear_action_keys();
+		void set_controller_buttons(uint32_t pad, int button = 0, bool state = false);
 
 	private:
+		void set_button(int button, bool state); // caller holds m_input
 
 		SDL_Thread *t_system_timer = nullptr;
 		SDL_Thread *t_system_loop = nullptr;
@@ -64,6 +69,7 @@ class System {
 
 		// shadow input
 		Uint32 shadow_buttons = 0;
+		blit::ActionInput shadow_action_input;
 		float shadow_joystick[2] = {0, 0};
 		float shadow_tilt[3] = {0, 0, 0};
 };

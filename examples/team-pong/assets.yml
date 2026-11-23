@@ -1,4 +1,0 @@
-assets.cpp:
-  assets/court.png: packed_court
-  assets/paddles.png: packed_paddles
-  assets/ball.png: packed_ball

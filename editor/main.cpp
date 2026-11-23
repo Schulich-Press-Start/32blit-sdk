@@ -4,12 +4,14 @@
 #else
 #include "bridge_client.hpp"
 #endif
+#include "appearance.hpp"
 #include "project.hpp"
 #include "documents.hpp"
 #include "scene_preview.hpp"
 #include "sprite_assets.hpp"
 #include "tabs.hpp"
 #include "tileset_assets.hpp"
+#include "ui_preview.hpp"
 
 #include <SDL.h>
 #ifdef _WIN32
@@ -104,7 +106,7 @@ namespace editor {
 
     class Workspace {
     public:
-      enum PanelId { Viewport2DPanel, SpritesPanel, DocumentPanel, EntitiesPanel, PrefabsPanel, LayersPanel,
+      enum PanelId { Viewport2DPanel, SpritesPanel, DocumentPanel, UiPanel, AudioPanel, EntitiesPanel, PrefabsPanel, LayersPanel,
 #ifndef __EMSCRIPTEN__
                      LivePanel,
 #endif
@@ -129,8 +131,9 @@ namespace editor {
         draw_region(Bottom, {size.x, size.y - top - gap}, content);
       }
 
-      void show(PanelId index) {
+      void show(PanelId index, bool focus = false) {
         panels_[index].open = panels_[index].select = true;
+        if(focus) focus_request_ = index;
       }
 
       bool is_open(PanelId index) const { return panels_[index].open; }
@@ -182,7 +185,7 @@ namespace editor {
               ImGui::EndDragDropSource();
             }
             if(visible) {
-              selected = static_cast<PanelId>(i);
+              if(panel.open) selected = static_cast<PanelId>(i);
               ImGui::EndTabItem();
             }
           }
@@ -216,9 +219,15 @@ namespace editor {
             }
             ImGui::EndDragDropTarget();
           }
+          if(focused_panel_ != PanelCount && panels_[focused_panel_].region == region && !panels_[focused_panel_].open)
+            focused_panel_ = selected.value_or(PanelCount);
           if(selected) {
             ImGui::PushID(*selected);
             if(ImGui::BeginChild("content")) {
+              if(focus_request_ == selected) {
+                ImGui::SetWindowFocus();
+                focus_request_.reset();
+              }
               if(ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) focused_panel_ = *selected;
               content(*selected);
             }
@@ -230,7 +239,7 @@ namespace editor {
         ImGui::PopID();
       }
       struct Panel { const char *name; Region region; bool open = true, select = false; };
-      Panel panels_[PanelCount] = {{"2D Viewport", Main}, {"Sprites", Main}, {"Documents", Main},
+      Panel panels_[PanelCount] = {{"2D Viewport", Main}, {"Sprites", Main}, {"Documents", Main}, {"UI", Main}, {"Audio", Main},
                                    {"Entities", Right}, {"Prefabs", Right},
                                    {"Layers", Right},
 #ifndef __EMSCRIPTEN__
@@ -242,6 +251,7 @@ namespace editor {
 #endif
                                   };
       PanelId focused_panel_ = Viewport2DPanel;
+      std::optional<PanelId> focus_request_;
       float top_ratio_ = .64f, left_ratio_ = .66f;
     };
 
@@ -273,8 +283,7 @@ namespace editor {
 #endif
 #ifdef _WIN32
       bool take_open_project_request() { return std::exchange(open_project_requested_, false); }
-      std::optional<std::pair<std::string, bool>> take_new_project_request() { return std::exchange(new_project_request_, std::nullopt); }
-      void enable_pong_template(bool enabled) { pong_template_ = enabled; }
+      std::optional<std::string> take_new_project_request() { return std::exchange(new_project_request_, std::nullopt); }
 #endif
 
       void invalidate_maps() {
@@ -292,7 +301,7 @@ namespace editor {
       }
 #endif
 
-      bool draw() {
+      bool draw(Appearance &appearance) {
         maps_.finish_frame();
 
         const auto *viewport = ImGui::GetMainViewport();
@@ -300,12 +309,14 @@ namespace editor {
         ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::Begin("32blit editor", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar);
-        const bool running = draw_header();
+        const bool running = draw_header(appearance);
 #ifndef __EMSCRIPTEN__
         if(has_world_ && !busy_ && ImGui::IsKeyPressed(ImGuiKey_F5, false))
           submit({Operation::Entities});
 #endif
         workspace_.draw([this](Workspace::PanelId panel) { draw_panel(panel); });
+        documents_.draw_dialogs();
+        route_file_request();
         ImGui::End();
         return running;
       }
@@ -326,7 +337,9 @@ namespace editor {
 #endif
         switch(index) {
           case Workspace::Viewport2DPanel: draw_scenes(); break;
-          case Workspace::DocumentPanel: documents_.draw(); route_asset_request(); break;
+          case Workspace::DocumentPanel: documents_.draw(Documents::Text); break;
+          case Workspace::UiPanel: documents_.draw(Documents::UI); break;
+          case Workspace::AudioPanel: documents_.draw(Documents::Audio); break;
           case Workspace::TilesetsPanel: {
             auto *scene = scene_context();
             if(scene) scene->prepare_map(project_);
@@ -347,7 +360,7 @@ namespace editor {
             if(auto *scene = scene_context()) {
               ImGui::PushID(scene->path().c_str());
               if(index == Workspace::LayersPanel) scene->draw_layers(project_);
-              else if(!scene->map_only()) scene->draw_objects(project_, index == Workspace::PrefabsPanel);
+              else if(!scene->map_only()) scene->draw_objects(project_, index == Workspace::PrefabsPanel, documents_);
               else ImGui::TextDisabled("Open a scene to edit entities or prefabs.");
               ImGui::PopID();
             } else ImGui::TextDisabled("No scene open.");
@@ -357,7 +370,7 @@ namespace editor {
           case Workspace::ToolsPanel: draw_tools(); break;
 #endif
           case Workspace::FilesPanel:
-            if(documents_.draw_files([this](const fs::path &file) {
+            documents_.draw_files([this](const fs::path &file) {
               const auto matches = [&](std::string_view relative) {
                 if(relative.empty()) return false;
                 std::error_code error;
@@ -369,7 +382,7 @@ namespace editor {
                 if(matches(view->path()) || matches(view->file_path(true)) || matches(view->file_path(true) + ".json") ||
                    matches(view->tileset_path())) return true;
               return false;
-            }) && !route_asset_request()) workspace_.show(Workspace::DocumentPanel);
+            });
             break;
           case Workspace::PanelCount: break;
         }
@@ -385,9 +398,12 @@ namespace editor {
         workspace_.show(Workspace::Viewport2DPanel);
       }
 
-      bool route_asset_request() {
+      void route_file_request() {
+        if(const auto panel = documents_.take_panel_request())
+          workspace_.show(*panel == Documents::Audio ? Workspace::AudioPanel :
+                          *panel == Documents::UI ? Workspace::UiPanel : Workspace::DocumentPanel, true);
         auto path = documents_.take_asset_request();
-        if(path.empty()) return false;
+        if(path.empty()) return;
         const auto ext = fs::u8path(path).extension();
         if(ext == ".scene" || ext == ".map") open_scene(std::move(path));
         else if(fs::u8path(path).stem().extension() == ".sprite") {
@@ -398,7 +414,6 @@ namespace editor {
           tilesets_.open(path);
           workspace_.show(Workspace::TilesetsPanel);
         }
-        return true;
       }
 
       bool loses_map(const ScenePreview &view) const {
@@ -490,6 +505,43 @@ namespace editor {
           if(!new_asset_error_.empty()) ImGui::TextWrapped("%s", new_asset_error_.c_str());
           ImGui::EndPopup();
         }
+      }
+
+      void draw_new_ui_layout(bool show) {
+        if(show) {
+          new_ui_path_ = "assets/menu.ui.json";
+          new_ui_error_.clear();
+          ImGui::OpenPopup("New UI Layout");
+        }
+        if(!ImGui::BeginPopupModal("New UI Layout", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+        if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool enter = ImGui::InputText("Path", &new_ui_path_, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::TextDisabled("Create a .ui.json file in an existing project folder.");
+        ImGui::BeginDisabled(new_ui_path_.empty());
+        if((ImGui::Button("Create") || enter) && !new_ui_path_.empty()) {
+          try {
+            if(new_ui_path_.find('\0') != new_ui_path_.npos || new_ui_path_.find(':') != new_ui_path_.npos)
+              throw std::runtime_error("Enter a project-relative file path.");
+            auto relative = fs::u8path(new_ui_path_).lexically_normal();
+            if(!relative.filename().empty() && !relative.has_extension()) relative += ".ui.json";
+            if(!is_ui_layout(relative.filename().u8string())) throw std::runtime_error("Use a .ui.json filename.");
+            const auto dest = new_project_file(project_.root(), relative);
+            sdk::ui::Layout layout;
+            layout.width = 320;
+            layout.height = 240;
+            const auto json = sdk::ui::write_layout(layout).dump(2) + '\n';
+            write_new_file(dest, json.data(), json.size());
+            documents_.refresh_files();
+            if(!documents_.open(dest.lexically_relative(project_.root()).generic_u8string()))
+              throw std::runtime_error("Created the UI layout but could not open it. Try opening it from Project Files.");
+            ImGui::CloseCurrentPopup();
+          } catch(const std::exception &error) { new_ui_error_ = error.what(); }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        if(!new_ui_error_.empty()) ImGui::TextWrapped("%s", new_ui_error_.c_str());
+        ImGui::EndPopup();
       }
 
       void draw_scenes() {
@@ -586,7 +638,7 @@ namespace editor {
         }
       }
 
-      bool draw_header() {
+      bool draw_header(Appearance &appearance) {
 #ifndef __EMSCRIPTEN__
         const bool can_start = !project_.active() && !connected_ && !busy_;
         bool show_attach = false;
@@ -596,30 +648,31 @@ namespace editor {
         auto *target = file_target(map);
         const bool tileset = workspace_.focused_panel() == Workspace::TilesetsPanel && !tilesets_.active_path().empty();
         const bool sprite = workspace_.focused_panel() == Workspace::SpritesPanel && !sprites_.active_path().empty();
-        const bool document = workspace_.focused_panel() == Workspace::DocumentPanel;
-        const bool can_save = document ? documents_.active_dirty() : sprite ? sprites_.active_dirty() :
+        const bool ui = workspace_.focused_panel() == Workspace::UiPanel;
+        const bool audio = workspace_.focused_panel() == Workspace::AudioPanel;
+        const bool document = ui || audio || workspace_.focused_panel() == Workspace::DocumentPanel;
+        const auto document_panel = audio ? Documents::Audio : ui ? Documents::UI : Documents::Text;
+        const bool can_save = document ? documents_.active_dirty(document_panel) : sprite ? sprites_.active_dirty() :
           tileset ? tilesets_.active_dirty() : target && target->dirty(map);
         const bool can_save_all = has_unsaved_files();
         const bool can_undo = sprite ? sprites_.can_history(false) : target && target->can_history(map, false);
         const bool can_redo = sprite ? sprites_.can_history(true) : target && target->can_history(map, true);
         bool save = false, save_all = false, revert = false, undo = false, redo = false;
+        bool new_ui = false;
         if(ImGui::BeginMenuBar()) {
           if(ImGui::BeginMenu("File")) {
 #ifdef _WIN32
             if(ImGui::MenuItem("New Project...", nullptr, false, can_start && !can_save_all)) {
               new_project_name_.clear();
-              use_pong_template_ = pong_template_;
               show_new_project_ = true;
             }
             if(ImGui::MenuItem("Open Project...", nullptr, false, can_start && !can_save_all)) open_project_requested_ = true;
             if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && (!can_start || can_save_all))
               ImGui::SetTooltip("Save or discard your edits and stop or disconnect the game before switching projects.");
 #endif
-            if(ImGui::MenuItem("Open File...", nullptr, false, project_.loaded())) {
-              workspace_.show(Workspace::DocumentPanel);
-              documents_.request_open();
-            }
-            save = ImGui::MenuItem(document ? "Save Document" : sprite ? "Save Sprite" : tileset ? "Save Tileset" : map ? "Save Map" : "Save Scene", "Ctrl+S", false, can_save);
+            new_ui = ImGui::MenuItem("New UI Layout...", nullptr, false, project_.loaded());
+            if(ImGui::MenuItem("Open File...", nullptr, false, project_.loaded())) documents_.request_open();
+            save = ImGui::MenuItem(audio ? "Save Audio Cues" : ui ? "Save UI Layout" : document ? "Save Document" : sprite ? "Save Sprite" : tileset ? "Save Tileset" : map ? "Save Map" : "Save Scene", "Ctrl+S", false, can_save);
             save_all = ImGui::MenuItem("Save All", "Ctrl+Shift+S", false, can_save_all);
             if(!document) revert = ImGui::MenuItem(sprite ? "Revert Sprite..." : tileset ? "Revert Tileset..." : map ? "Revert Map..." : "Revert Scene...", nullptr, false, can_save);
 #ifndef __EMSCRIPTEN__
@@ -639,6 +692,7 @@ namespace editor {
             redo = ImGui::MenuItem(sprite ? "Redo Sprite Edit" : map ? "Redo Map Edit" : "Redo Scene Edit", "Ctrl+Shift+Z", false, can_redo);
             ImGui::EndMenu();
           }
+          appearance.draw_menu();
           if(ImGui::BeginMenu("Shortcuts")) {
             if(ImGui::BeginMenu("Frame Selection")) {
               for(int key = ImGuiKey_A; key <= ImGuiKey_Z; ++key) {
@@ -668,9 +722,24 @@ namespace editor {
             }
             ImGui::EndMenu();
           }
-          if(project_.play_configured() || project_.build_configured()) {
-            if(project_.play_configured() && ImGui::MenuItem("Play", nullptr, false, can_start)) start_game(false);
-            if(project_.build_configured() && ImGui::MenuItem("Dev", nullptr, false, can_start)) start_game(true);
+          if(project_.has_scene_preview() || project_.has_packaged_game() || project_.build_configured()) {
+            if(project_.scene_preview_running()) {
+              if(ImGui::MenuItem("Restart Scene Preview", nullptr, false, !can_save_all && !connected_ && !busy_))
+                project_.restart_scene_preview();
+              if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Stop the preview and reload the saved scene in the generic player.\nSave All first if you have unsaved changes.");
+            } else if(project_.has_scene_preview()) {
+              if(ImGui::MenuItem("Play Scene", nullptr, false, can_start && !can_save_all)) start_game(Project::Launch::ScenePreview);
+              if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Run the saved scene with the generic player. No compiler or game.cpp.\nSave All first if you have unsaved changes.");
+            }
+            if(project_.has_packaged_game() && ImGui::MenuItem("Play", nullptr, false, can_start)) start_game(Project::Launch::PackagedGame);
+            if(project_.build_configured()) {
+              if(ImGui::MenuItem("Build & Run", nullptr, false, can_start && !can_save_all)) start_game(Project::Launch::Build);
+              if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Compile and run your own C++ game with the saved scene.\nSave All first if you have unsaved changes.");
+              if(ImGui::MenuItem("Dev", nullptr, false, can_start)) start_game(Project::Launch::Dev);
+            }
             if(ImGui::MenuItem("Stop", nullptr, false, project_.active())) {
               project_.stop();
               auto_connect_ = false;
@@ -691,6 +760,7 @@ namespace editor {
 #endif
           ImGui::EndMenuBar();
         }
+        draw_new_ui_layout(new_ui);
         if(!ImGui::GetTopMostPopupModal()) {
           constexpr auto global = ImGuiInputFlags_RouteGlobal;
           if(can_save_all) save_all |= ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, global);
@@ -701,7 +771,7 @@ namespace editor {
           }
         }
         if(save_all) {
-          documents_.save(true);
+          documents_.save_all();
           sprites_.save(true);
           if(tilesets_.dirty()) {
             tilesets_.save(true);
@@ -714,7 +784,7 @@ namespace editor {
               view.save_file(project_, true);
           }
         } else if(save) {
-          if(document) documents_.save(false);
+          if(document) documents_.save_active(document_panel);
           else if(sprite) sprites_.save(false);
           else if(tileset) {
             tilesets_.save(false);
@@ -750,11 +820,10 @@ namespace editor {
         if(ImGui::BeginPopupModal("New Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
           if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
           ImGui::InputText("Project name", &new_project_name_);
-          if(pong_template_) ImGui::Checkbox("Pong tutorial (art and runner only)", &use_pong_template_);
-          ImGui::TextDisabled("Create adds a new folder inside the location you choose.");
+          ImGui::TextDisabled("Create a blank scene and a C++ game in a new folder.");
           ImGui::BeginDisabled(new_project_name_.empty());
           if(ImGui::Button("Create...")) {
-            new_project_request_ = {new_project_name_, use_pong_template_};
+            new_project_request_ = new_project_name_;
             ImGui::CloseCurrentPopup();
           }
           ImGui::EndDisabled();
@@ -801,9 +870,9 @@ namespace editor {
         }
       }
 
-      void start_game(bool dev) {
-        auto_connect_ = dev || !project_.packaged_play();
-        project_.start(dev, address_);
+      void start_game(Project::Launch mode) {
+        auto_connect_ = mode == Project::Launch::Build || mode == Project::Launch::Dev;
+        project_.start(mode, address_);
       }
 
       void submit(Request request) {
@@ -1082,14 +1151,15 @@ namespace editor {
       bool new_map_ = false;
       int new_cells_[2] = {32, 24};
       std::string new_asset_path_, new_asset_error_, new_tileset_;
+      std::string new_ui_path_, new_ui_error_;
       std::vector<std::string> new_tilesets_;
       Workspace workspace_;
       ImGuiKey frame_key_ = ImGuiKey_F, pan_key_ = ImGuiMod_Shift;
 #ifdef _WIN32
       bool open_project_requested_ = false;
-      bool pong_template_ = false, use_pong_template_ = false, show_new_project_ = false;
+      bool show_new_project_ = false;
       std::string new_project_name_;
-      std::optional<std::pair<std::string, bool>> new_project_request_;
+      std::optional<std::string> new_project_request_;
 #endif
 #ifndef __EMSCRIPTEN__
       int tool_ = 0;
@@ -1111,7 +1181,7 @@ namespace editor {
 #ifdef _WIN32
     class EditorDpi {
     public:
-      explicit EditorDpi(SDL_Window *window) : base_style_(ImGui::GetStyle()) {
+      EditorDpi(SDL_Window *window, const Appearance &appearance) : appearance_(appearance) {
         SDL_SysWMinfo info{};
         SDL_VERSION(&info.version);
         if(SDL_GetWindowWMInfo(window, &info) && info.subsystem == SDL_SYSWM_WINDOWS)
@@ -1129,8 +1199,7 @@ namespace editor {
         if(!dpi || dpi == dpi_) return;
         dpi_ = dpi;
         const float scale = dpi / 96.0f;
-        ImGui::GetStyle() = base_style_;
-        ImGui::GetStyle().ScaleAllSizes(scale);
+        appearance_.apply_scale(scale);
 
         // Re-rasterize at the new size, rather than stretching an old atlas.
         auto &io = ImGui::GetIO();
@@ -1145,7 +1214,7 @@ namespace editor {
       }
 
     private:
-      ImGuiStyle base_style_;
+      const Appearance &appearance_;
       std::string font_;
       HWND window_ = nullptr;
       unsigned dpi_ = 0;
@@ -1161,11 +1230,11 @@ namespace editor {
       return input;
     }
 
-    bool render_frame(SDL_Renderer *renderer, Editor &editor) {
+    bool render_frame(SDL_Renderer *renderer, Editor &editor, Appearance &appearance) {
       ImGui_ImplSDLRenderer2_NewFrame();
       ImGui_ImplSDL2_NewFrame();
       ImGui::NewFrame();
-      const bool running = editor.draw();
+      const bool running = editor.draw(appearance);
       ImGui::Render();
 
       auto *data = ImGui::GetDrawData();
@@ -1223,7 +1292,7 @@ namespace editor {
             io.FontDefault = io.Fonts->AddFontDefault(&font);
           }
         }
-        render_frame(renderer_, *editor_);
+        render_frame(renderer_, *editor_, appearance_);
       }
 
     private:
@@ -1249,6 +1318,7 @@ namespace editor {
       static const char *slot_path(int slot) { return slot == 0 ? "/editor-project-a" : "/editor-project-b"; }
       SDL_Window *window_;
       SDL_Renderer *renderer_;
+      Appearance appearance_;
       std::unique_ptr<Editor> editor_;
       int slot_ = 0;
       float font_density_ = 0;
@@ -1302,40 +1372,54 @@ namespace editor {
       return fs::path(name.get());
     }
 
-    fs::path create_native_project(const fs::path &parent, const std::string &name, const fs::path &pong_template) {
+    fs::path create_native_project(const fs::path &parent, const std::string &name,
+                                   const fs::path &editor_dir, const fs::path &sdk_dir) {
       if(name.empty() || name.size() > 80 || name.front() == ' ' || name.back() == ' ' || name.back() == '.' ||
          !std::all_of(name.begin(), name.end(), [](unsigned char c) {
            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_';
          })) throw std::runtime_error("Use 1–80 letters, digits, spaces, hyphens or underscores for the project name.");
+      const auto packaged_seed = editor_dir / "SceneStarter";
+      const bool packaged = !editor_dir.empty() && fs::is_directory(packaged_seed);
+      const auto seed = packaged ? packaged_seed : sdk_dir / "templates/scene-game";
+      if(!packaged && (sdk_dir.empty() || !fs::is_directory(seed)))
+        throw std::runtime_error("Scene starter not found. Extract the entire editor kit (including Editor/SceneStarter), "
+                                 "or set 32BLIT_DIR to an SDK containing templates/scene-game and restart the editor.");
+      constexpr const char *sources[] = {"game.cpp", "CMakeLists.txt", "CMakePresets.json"};
+      for(const auto file : sources) {
+        if(!fs::is_regular_file(seed / file))
+          throw std::runtime_error("Missing starter file: " + (seed / file).u8string() + ". Restore the complete scene starter.");
+      }
+      const bool preview = fs::is_regular_file(seed / "Runtime/game.exe");
+      if(packaged && !preview)
+        throw std::runtime_error("Missing " + (seed / "Runtime/game.exe").u8string() + ". Extract the entire kit, including the preview player and its DLLs.");
+
       const auto root = parent / fs::u8path(name);
       if(!fs::create_directory(root)) throw std::runtime_error("A folder with that project name already exists.");
-      const bool pong = !pong_template.empty();
-      const char *scene = pong ? "scenes/pong.scene" : "scenes/main.scene";
+      constexpr char scene[] = "scenes/main.scene";
       const auto write_text = [&](const fs::path &path, std::string_view text) {
         write_new_file(root / path, text.data(), text.size());
       };
       try {
         fs::create_directory(root / "scenes");
         fs::create_directory(root / "assets");
-        Json manifest{{"name", name}, {"scene", scene}, {"registry", "registry.json"}};
-        if(pong) {
-          for(const auto *file : {"paddles.png", "ball.png", "court.png"})
-            fs::copy_file(pong_template / "assets" / file, root / "assets" / file);
-          fs::copy_file(pong_template / "registry.json", root / "registry.json");
-          fs::copy(pong_template / "Runtime", root / "Runtime", fs::copy_options::recursive);
-          manifest["windows"] = {{"play_exe", "Runtime/team_pong.exe"}};
-        } else {
-          auto components = Json::object();
-          for(uint16_t i = 0; i < sdk::component_count(); ++i) {
-            const auto &type = *sdk::component_by_id(i);
-            auto fields = Json::object();
-            for(uint8_t j = 0; j < type.field_count; ++j)
-              fields[type.fields[j].name] = sdk::field_type_name(type.fields[j].type);
-            components[type.name] = std::move(fields);
-          }
-          write_text("registry.json", Json{{"version", 1}, {"components", std::move(components)}}.dump(2));
+        for(const auto file : sources) fs::copy_file(seed / file, root / file);
+        Json manifest{{"name", name}, {"scene", scene}, {"registry", "registry.json"}, {"target", "game"},
+                      {"windows", {{"preset", "windows"}, {"build_dir", "build-windows"}, {"exe", "build-windows/Debug/game.exe"}}},
+                      {"linux", {{"preset", "linux"}, {"build_dir", "build-linux"}, {"exe", "build-linux/game"}}}};
+        if(preview) {
+          fs::copy(seed / "Runtime", root / "Runtime", fs::copy_options::recursive);
+          manifest["windows"]["preview_exe"] = "Runtime/game.exe";
         }
-        write_text(scene, pong ? "scene 1 Pong\n" : "scene 1 main\n");
+        auto components = Json::object();
+        for(uint16_t i = 0; i < sdk::component_count(); ++i) {
+          const auto &type = *sdk::component_by_id(i);
+          auto fields = Json::object();
+          for(uint8_t j = 0; j < type.field_count; ++j)
+            fields[type.fields[j].name] = sdk::field_type_name(type.fields[j].type);
+          components[type.name] = std::move(fields);
+        }
+        write_text("registry.json", Json{{"version", 1}, {"components", std::move(components)}}.dump(2) + '\n');
+        write_text(scene, "scene 1 main\n");
         write_text("blit-project.json", manifest.dump(2) + '\n');
       } catch(...) {
         std::error_code error;
@@ -1347,17 +1431,23 @@ namespace editor {
 #endif
 
     int event_loop(SDL_Window *window, SDL_Renderer *renderer, const char *address, const char *project) {
+      Appearance appearance;
 #ifdef _WIN32
-      EditorDpi dpi(window);
+      EditorDpi dpi(window, appearance);
 #endif
       auto editor = std::make_unique<Editor>(address, project, renderer);
 #ifdef _WIN32
       const std::unique_ptr<char, decltype(&SDL_free)> base(SDL_GetBasePath(), SDL_free);
       auto executable_dir = base ? fs::u8path(base.get()) : fs::path{};
       if(!executable_dir.has_filename()) executable_dir = executable_dir.parent_path();
-      const auto pong_template = executable_dir.empty() ? fs::path{} : executable_dir.parent_path() / "Pong Reference";
-      const bool pong_available = !pong_template.empty() && fs::is_regular_file(pong_template / "Runtime/team_pong.exe");
-      editor->enable_pong_template(pong_available);
+      auto sdk_dir = executable_dir.empty() ? fs::path{} : executable_dir.parent_path() / "32blit-sdk";
+      if(const auto *configured = SDL_getenv("32BLIT_DIR"); configured && *configured) {
+        sdk_dir = fs::u8path(configured);
+      } else {
+        if(sdk_dir.empty() || !fs::is_regular_file(sdk_dir / "32blit-config.cmake")) sdk_dir = fs::u8path(BLIT_EDITOR_SOURCE_SDK);
+        if(fs::is_regular_file(sdk_dir / "32blit-config.cmake"))
+          SetEnvironmentVariableW(L"32BLIT_DIR", sdk_dir.c_str()); // inherited by CMake; a project's cache still wins
+      }
 #endif
       Uint64 redraw_until = SDL_GetTicks64() + 1000;
       for(;;) {
@@ -1382,7 +1472,7 @@ namespace editor {
 #ifdef _WIN32
         dpi.refresh();
 #endif
-        if(!render_frame(renderer, *editor)) return 0;
+        if(!render_frame(renderer, *editor, appearance)) return 0;
 #ifdef _WIN32
         auto creation = editor->take_new_project_request();
         if(creation || editor->take_open_project_request()) {
@@ -1391,12 +1481,11 @@ namespace editor {
           const auto owner = SDL_GetWindowWMInfo(window, &info) ? info.info.win.window : nullptr;
           try {
             if(auto folder = pick_project_folder(owner, creation.has_value()); !folder.empty()) {
-              if(creation) folder = create_native_project(folder, creation->first, creation->second ? pong_template : fs::path{});
+              if(creation) folder = create_native_project(folder, *creation, executable_dir, sdk_dir);
               editor = std::make_unique<Editor>(address, folder.u8string().c_str(), renderer);
-              editor->enable_pong_template(pong_available);
             }
           } catch(const std::exception &error) {
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Could not open project", error.what(), window);
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, creation ? "Could not create project" : "Could not open project", error.what(), window);
           }
           redraw_until = SDL_GetTicks64() + 1000;
         }
@@ -1450,7 +1539,6 @@ namespace editor {
 
       IMGUI_CHECKVERSION();
       ImGui::CreateContext();
-      workspace_style();
       ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
       ImGui::GetIO().IniFilename = nullptr;
       const bool platform = ImGui_ImplSDL2_InitForSDLRenderer(window.get(), renderer.get());

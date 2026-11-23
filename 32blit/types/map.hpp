@@ -33,19 +33,22 @@ namespace blit {
     void draw(Surface &dest, Surface &atlas, Rect viewport, Point destination = {});
     void mipmap_texture_span(blit::Surface *dest, blit::Point s, uint16_t c, blit::Surface *sprites, Vec2 swc, Vec2 ewc);
     void texture_span(blit::Surface *dest, blit::Point s, uint16_t c, blit::Surface *sprites, Vec2 swc, Vec2 ewc, uint8_t mipmap_index = 0);
+
+    // Shared world draw order; smaller values draw nearer the front.
+    int32_t layer = 1;
   };
 
   struct Map {
     blit::Rect bounds;
 
     std::map<std::string, MapLayer> layers;
-    // TMX document order for packed maps; empty for ad hoc maps.
+    // Document order for packed maps (the tie-break for equal orders); empty for ad hoc maps.
     std::vector<std::string> layer_order;
     std::vector<uint8_t> flags;
 
     Map(blit::Rect bounds);
 
-    // BTMP stores cells only. Configure world geometry from the associated tileset.
+    // BTMP doesn't store tile size. Configure world geometry from the associated tileset.
     bool set_tile_size(int size);
     int tile_size() const { return tile_size_; }
     Size pixel_size() const { return {bounds.w * tile_size_, bounds.h * tile_size_}; }
@@ -65,9 +68,9 @@ namespace blit {
     int tile_size_ = default_tile_size;
   };
 
-  // Decodes a complete BTMP v1 asset; returns nullptr for malformed data.
+  // Decodes BTMP v1 or v2; returns nullptr for malformed data. V1 layers get N through 1 in document order.
   std::unique_ptr<Map> load_tiled_map(const uint8_t *data, std::size_t size);
-  // Serialize native BTMP layers in draw order. Empty on invalid input.
+  // Serialize BTMP v2 in document order, with signed LE32 order after each name. Empty on invalid input.
   std::vector<uint8_t> write_map(const Map &map);
 
   // Extracts the second-line marker from a generated Tiled scene. The view
@@ -92,8 +95,11 @@ inline void blit::MapLayer::draw(Surface &dest, Surface &atlas, Rect viewport, P
         const Point cell(x, y);
         const int id = tile_at(cell) - 1;
         if(id < 0 || id >= count) continue;
+        // BTMP stores horizontal/vertical/swap in bits 2/1/0; Surface uses 0/1/2.
+        const auto bits = transform_at(cell);
+        const int transform = ((bits & 4) >> 2) | (bits & 2) | ((bits & 1) << 2);
         dest.blit(&atlas, {id % columns * size, id / columns * size, size, size},
-                  {destination.x + x * size - viewport.x, destination.y + y * size - viewport.y}, transform_at(cell));
+                  {destination.x + x * size - viewport.x, destination.y + y * size - viewport.y}, transform);
       }
     }
   }

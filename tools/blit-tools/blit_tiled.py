@@ -305,7 +305,7 @@ def _layer_name(layer, seen):
     return name, encoded
 
 
-def _pack_layer(layer, name, encoded, width, height, first, tile_count):
+def _pack_layer(layer, name, encoded, width, height, first, tile_count, order):
     _children(layer, ('data', 'properties'), name)
     _integer(layer.get('width'), width, width, f'{name} width')
     _integer(layer.get('height'), height, height, f'{name} height')
@@ -326,7 +326,7 @@ def _pack_layer(layer, name, encoded, width, height, first, tile_count):
             transforms[index] = (1 | ((flags & 2) << 1) | ((flags & 4) >> 1)) if flags & 1 else flags
         else:
             _require(not flags, f'{name}: transform on an empty tile')
-    return bytes((len(encoded),)) + encoded + tiles + transforms
+    return bytes((len(encoded),)) + encoded + struct.pack('<i', order) + tiles + transforms
 
 
 def _quoted(text):
@@ -457,6 +457,9 @@ def _compile(project, source, tmx, classes, registry, flags):
     height = _integer(root.get('height'), 1, 0xFFFF, 'map height')
     _require(width * height <= 0x7FFFFFFF, 'map exceeds signed engine tile index range')
     first, tile_count, tsx, tile_props, atlas = _atlas(project, tmx, root, flags)
+    layer_count = len(root.findall('layer'))
+    _require(layer_count, 'expected at least one tile layer')
+    _require(layer_count <= 0xFFFF, 'too many tile layers')
     layers, layer_names, objects, object_names, keys, stable_keys = [], set(), [], set(), {}, set()
     for layer in root:
         if layer.tag not in ('layer', 'objectgroup'):
@@ -464,8 +467,9 @@ def _compile(project, source, tmx, classes, registry, flags):
         name, encoded = _layer_name(layer, layer_names)
         _neutral_layer(layer, name)
         if layer.tag == 'layer':
-            _require(len(layers) < 0xFFFF, 'too many tile layers')
-            layers.append(_pack_layer(layer, name, encoded, width, height, first, tile_count))
+            # Tiled lists layers back-to-front; smaller values draw closer to the front.
+            layers.append(_pack_layer(layer, name, encoded, width, height, first, tile_count,
+                                      layer_count - len(layers)))
             continue
         _children(layer, ('object', 'properties'), name)
         for obj in layer.findall('object'):
@@ -481,11 +485,10 @@ def _compile(project, source, tmx, classes, registry, flags):
                 _require(object_name not in object_names, f'{label}: duplicate entity name {object_name!r}')
                 object_names.add(object_name)
             objects.append((obj, key, label))
-    _require(layers, 'expected at least one tile layer')
     lines = []
     for obj, key, label in objects:
         lines.extend(_entity(obj, key, label, keys, classes, registry))
-    packed = struct.pack('<4sHHHH', b'BTMP', 1, width, height, len(layers)) + b''.join(layers)
+    packed = struct.pack('<4sHHHH', b'BTMP', 2, width, height, layer_count) + b''.join(layers)
     return packed, lines, tsx, tile_props, atlas
 
 

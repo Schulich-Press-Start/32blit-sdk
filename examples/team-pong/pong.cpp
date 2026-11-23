@@ -1,245 +1,231 @@
 #include "32blit.hpp"
-#include "assets.hpp"
+#include "game_scene.hpp"
 #include "paddle.hpp"
-#include "scene.hpp"
-#include "sprite_render.hpp"
-#include "tileset_descriptor.hpp"
-#ifdef BLIT_DEV_BRIDGE
-#include "bridge.hpp"
-#endif
 
 #include <algorithm>
 #include <cstdio>
-#include <fstream>
-#include <map>
-#include <memory>
-#include <utility>
 
 using namespace blit;
 using sdk::BoxCollider2D;
-using sdk::Sprite;
 using sdk::Transform2D;
 
-namespace {
-constexpr int width = 320, height = 240;
-constexpr float court_top = 24, court_bottom = 216;
-constexpr float tick_seconds = 0.010f; // The SDK runs update() every 10 ms.
+sdk::GameScene game;
+
+constexpr float court_top = 24.0f;
+constexpr float court_bottom = 216.0f;
+constexpr float tick_seconds = 0.010f; // update() runs every 10 ms.
 constexpr float ball_speed = 190.0f;
-constexpr char scene_path[] = "scenes/pong.scene";
-constexpr char map_path[] = "scenes/pong.map";
 
-sdk::World world(16);
-std::map<std::string, std::string, std::less<>> scene_text;
-
-struct PackedSurfaceDeleter {
-  void operator()(Surface *surface) const {
-    delete[] surface->data;
-    delete[] surface->palette;
-    delete surface;
-  }
-};
-std::unique_ptr<Surface, PackedSurfaceDeleter> court_sheet, paddle_sheet, ball_sheet;
-
-struct Art {
-  std::unique_ptr<Map> court;
-  sdk::SpriteClips paddle, ball;
-};
-Art art, staged_art;
-Transform2D serve_position;
-float vx = 0, vy = 0;
+float vx = 0.0f;
+float vy = 0.0f;
 bool waiting = true;
+Transform2D serve_position;
 int serve_direction = -1;
-unsigned player_score = 0, cpu_score = 0;
+unsigned int player_score = 0;
+unsigned int cpu_score = 0;
 
-bool read_bytes(const std::string &path, std::string &bytes) {
-  std::ifstream file(path, std::ios::binary | std::ios::ate);
-  const auto length = file.tellg();
-  if (length < 0) return false;
-  bytes.resize(static_cast<std::size_t>(length));
-  return static_cast<bool>(file.seekg(0).read(bytes.data(), static_cast<std::streamsize>(length)));
-}
-
-bool read_clips(const char *path, const char *image, const Surface &sheet, sdk::SpriteClips &clips) {
-  std::ifstream file(path);
-  const auto json = nlohmann::json::parse(file, nullptr, false);
-  const char *error = sdk::read_sprite_clips(json, clips);
-  if (!error && (clips.image != image || sheet.bounds.w % clips.frame_width || sheet.bounds.h % clips.frame_height))
-    error = "expected the corresponding packed PNG and a matching frame grid";
-  if (!error) {
-    const unsigned cells = (sheet.bounds.w / clips.frame_width) * (sheet.bounds.h / clips.frame_height);
-    for (const auto &entry : clips.clips)
-      for (const auto &frame : entry.second.frames)
-        if (frame.cell >= cells) error = "frame outside the sheet";
-  }
-  if (error) std::fprintf(stderr, "%s: %s\n", path, error);
-  return !error;
-}
-
-bool read_scene_source(void *, std::string_view path, std::string_view &text) {
-  auto &entry = *scene_text.try_emplace(std::string(path)).first;
-  if (!read_bytes(entry.first, entry.second)) return false;
-  text = entry.second;
-  if (path != scene_path) return true;
-
-  std::string bytes;
-  if (read_bytes(map_path, bytes))
-    staged_art.court = load_tiled_map(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
-  if (!staged_art.court) {
-    std::fprintf(stderr, "%s: cannot read native map\n", map_path);
-    return false;
-  }
-  std::ifstream link(std::string(map_path) + ".json");
-  const auto association = nlohmann::json::parse(link, nullptr, false);
-  if(!association.is_object() || !association.contains("tileset") || association["tileset"] != "assets/court.tileset.json") {
-    std::fprintf(stderr, "%s.json: expected the Pong court tileset association\n", map_path);
-    return false;
-  }
-  std::ifstream tileset_file("assets/court.tileset.json");
-  sdk::TilesetDescriptor tileset;
-  if(sdk::read_tileset_descriptor(nlohmann::json::parse(tileset_file, nullptr, false), tileset) ||
-     tileset.image != "assets/court.png" ||
-     !atlas_tile_count(court_sheet->bounds.w, court_sheet->bounds.h, tileset.tile_size) ||
-     !staged_art.court->set_tile_size(tileset.tile_size)) {
-    std::fprintf(stderr, "assets/court.tileset.json: invalid packed court geometry\n");
-    return false;
-  }
-  return read_clips("assets/paddle.sprite.json", "assets/paddles.png", *paddle_sheet, staged_art.paddle) &&
-         read_clips("assets/ball.sprite.json", "assets/ball.png", *ball_sheet, staged_art.ball);
-}
-
-void finish_scene(void *, bool success) noexcept {
-  if (success) {
-    art = std::move(staged_art);
-    if (const auto *ball = world.get<Transform2D>(world.find("ball"))) serve_position = *ball;
-    waiting = true;
-    serve_direction = -1;
-    player_score = cpu_score = 0;
-  }
-  staged_art = {};
-  scene_text.clear();
-}
-
-struct Box { float left, top, right, bottom; };
-
-Box bounds(const Transform2D &pos, const BoxCollider2D &box) {
-  const float left = pos.x + box.offset_x, top = pos.y + box.offset_y;
-  return {left, top, left + box.width, top + box.height};
-}
-
-float center_y(Box box) { return (box.top + box.bottom) * 0.5f; }
-
-void draw_court(Map &map) {
-  for(const auto &name : map.layer_order)
-    map.layers.at(name).draw(screen, *court_sheet, Rect(0, 0, width, height));
-}
-} // namespace
-
-void init() {
-  set_screen_mode(ScreenMode::hires, Size(width, height));
-  static sdk::ComponentPool<sdk::Name> names(world, world.capacity());
-  static sdk::ComponentPool<Transform2D> transforms(world, world.capacity());
-  static sdk::ComponentPool<Sprite> sprites(world, world.capacity());
-  static sdk::ComponentPool<BoxCollider2D> colliders(world, world.capacity());
-  static sdk::ComponentPool<PaddleDrive> drives(world, world.capacity());
-  static sdk::SceneRuntime scenes(world, {24, 72, 160, 8}, {nullptr, read_scene_source, finish_scene});
-
-  court_sheet.reset(Surface::load(packed_court));
-  paddle_sheet.reset(Surface::load(packed_paddles));
-  ball_sheet.reset(Surface::load(packed_ball));
-  if (!court_sheet || !paddle_sheet || !ball_sheet) return;
-  sdk::SceneError error;
-  if (!scenes.load(scene_path, error))
-    std::fprintf(stderr, "%s:%u: %s\n", error.file, error.line, error.message);
-#ifdef BLIT_DEV_BRIDGE
-  sdk::bridge_attach(world, &scenes);
-#endif
-}
-
-void update(uint32_t) {
-  const auto ball = world.find("ball");
-  auto *pos = world.get<Transform2D>(ball);
-  const auto *shape = world.get<BoxCollider2D>(ball);
-  if (!pos || !shape || shape->width <= 0 || shape->height <= 0 ||
-      shape->height > court_bottom - court_top) return;
-
-  if (buttons.pressed & Button::B) {
-    player_score = cpu_score = 0;
-    serve_direction = -1;
-    *pos = serve_position;
-    waiting = true;
-    return;
-  }
-  if (waiting && (buttons.pressed & Button::A)) {
-    vx = serve_direction * ball_speed;
-    vy = (player_score + cpu_score) % 2 ? -74.0f : 74.0f;
-    waiting = false;
-  }
-
-  const auto before = bounds(*pos, *shape);
-  if (!waiting) {
-    pos->x += vx * tick_seconds;
-    pos->y += vy * tick_seconds;
-    const float top = court_top - shape->offset_y;
-    const float bottom = court_bottom - shape->offset_y - shape->height;
-    if (pos->y < top && vy < 0) { pos->y = top; vy = -vy; }
-    if (pos->y > bottom && vy > 0) { pos->y = bottom; vy = -vy; }
-  }
-  const auto next = bounds(*pos, *shape);
-  const bool moving_right = vx > 0;
-  bool bounced = false;
-  const int input = bool(buttons & Button::DPAD_DOWN) - bool(buttons & Button::DPAD_UP);
-
-  world.each<Transform2D, BoxCollider2D, PaddleDrive>([&](sdk::Entity, Transform2D &paddle,
-                                                        const BoxCollider2D &box, const PaddleDrive &drive) {
-    if (box.width <= 0 || box.height <= 0 || box.height > court_bottom - court_top) return;
-    const float step = std::max(0.0f, drive.speed) * tick_seconds;
-    paddle.y += drive.computer ? std::clamp(center_y(next) - center_y(bounds(paddle, box)), -step, step)
-                               : input * step;
-    paddle.y = std::clamp(paddle.y, court_top - box.offset_y, court_bottom - box.offset_y - box.height);
-    if (waiting || bounced) return;
-
-    // Test the leading ball edge crossing the inward paddle face.
-    const auto target = bounds(paddle, box);
-    const float face = moving_right ? target.left : target.right;
-    const bool crossed = moving_right ? before.right <= face && next.right >= face
-                                      : before.left >= face && next.left <= face;
-    if (crossed && next.top < target.bottom && next.bottom > target.top) {
-      bounced = true;
-      pos->x += face - (moving_right ? next.right : next.left);
-      vx = -vx;
-      const float hit = (center_y(next) - center_y(target)) / (box.height * 0.5f);
-      vy = std::clamp(hit, -1.0f, 1.0f) * 150.0f;
-    }
-  });
-
-  if (waiting) return;
-  const auto result = bounds(*pos, *shape);
-  if (result.right < 0) { ++cpu_score; serve_direction = -1; }
-  else if (result.left > width) { ++player_score; serve_direction = 1; }
-  else return;
-  *pos = serve_position;
+// Clear both scores and wait for the first serve of a new match.
+void reset_match() {
+  player_score = 0;
+  cpu_score = 0;
+  serve_direction = -1;
   waiting = true;
 }
 
+// Remember the ball's starting position and reset the match on scene load.
+void start_match() {
+  const Transform2D *ball = game.position("ball");
+  if (ball) {
+    serve_position = *ball;
+  }
+  reset_match();
+}
+
+// Return -1 for up, +1 for down, or 0 when the inputs cancel.
+int player_direction() {
+  int direction = 0;
+  if (sdk::button_down(Button::DPAD_UP)) {
+    direction -= 1;
+  }
+  if (sdk::button_down(Button::DPAD_DOWN)) {
+    direction += 1;
+  }
+  return direction;
+}
+
+// Check that the collision box has a usable size and fits between the rails.
+bool fits_court(const BoxCollider2D &box) {
+  return box.width > 0 && box.height > 0 && box.height <= court_bottom - court_top;
+}
+
+// Move a paddle vertically without letting its collision box cross a rail.
+void move_paddle(Transform2D &paddle, const BoxCollider2D &box, float distance) {
+  // Stop at the edge of the collider, even when the sprite has a different size.
+  const float top = court_top - box.offset_y;
+  const float bottom = court_bottom - box.offset_y - box.height;
+  paddle.y = std::clamp(paddle.y + distance, top, bottom);
+}
+
+// Launch the next serve using the last goal and total points to choose its direction.
+void serve() {
+  if (waiting && sdk::button_pressed(Button::A)) {
+    vx = serve_direction * ball_speed;
+    const unsigned int points_played = player_score + cpu_score;
+    if (points_played % 2 == 0) {
+      vy = 74.0f;
+    } else {
+      vy = -74.0f;
+    }
+    waiting = false;
+  }
+}
+
+// Move the ball one tick and bounce it off the top or bottom rail.
+void advance_ball(Transform2D &ball, const BoxCollider2D &box) {
+  ball.x += vx * tick_seconds;
+  ball.y += vy * tick_seconds;
+
+  const float top = court_top - box.offset_y;
+  const float bottom = court_bottom - box.offset_y - box.height;
+  if (ball.y < top && vy < 0.0f) {
+    ball.y = top;
+    vy = -vy;
+  } else if (ball.y > bottom && vy > 0.0f) {
+    ball.y = bottom;
+    vy = -vy;
+  }
+}
+
+// Bounce the ball only if its leading edge crosses the face of a paddle.
+bool return_hit(Transform2D &ball, const sdk::Box &before, const sdk::Box &next, const sdk::Box &paddle) {
+  if (next.top >= paddle.bottom || next.bottom <= paddle.top) {
+    return false;
+  }
+
+  // Did the ball's leading edge cross the paddle's face during this tick?
+  if (vx > 0.0f && before.right <= paddle.left && next.right >= paddle.left) {
+    ball.x += paddle.left - next.right;
+  } else if (vx < 0.0f && before.left >= paddle.right && next.left <= paddle.right) {
+    ball.x += paddle.right - next.left;
+  } else {
+    return false;
+  }
+
+  vx = -vx;
+  // A centre hit flies straight; hitting near an end gives a steeper return.
+  const float half_height = (paddle.bottom - paddle.top) / 2.0f;
+  const float offset = (sdk::center_y(next) - sdk::center_y(paddle)) / half_height;
+  vy = std::clamp(offset, -1.0f, 1.0f) * 150.0f;
+  return true;
+}
+
+// Chase the ball without moving farther than the CPU can travel in one tick.
+void move_cpu(Transform2D &paddle, const BoxCollider2D &box, const sdk::Box &ball, float step) {
+  const sdk::Box paddle_bounds = sdk::bounds(paddle, box);
+  const float gap = sdk::center_y(ball) - sdk::center_y(paddle_bounds);
+  // Stop at the ball's height if it is closer than one step.
+  move_paddle(paddle, box, std::clamp(gap, -step, step));
+}
+
+// Use each paddle's settings to move it and check for a return.
+void update_paddles(Transform2D &ball, const sdk::Box &before, const sdk::Box &next) {
+  const int direction = player_direction();
+  bool hit = false;
+
+  // Read the current components each tick: role, speed and even the actors can change live.
+  for (uint16_t slot = 0; slot < game.world.capacity(); ++slot) {
+    const sdk::Entity actor = game.world.entity_at(slot);
+    const PaddleDrive *drive = game.world.get<PaddleDrive>(actor);
+    if (!drive) {
+      continue;
+    }
+    Transform2D *position = game.world.get<Transform2D>(actor);
+    const BoxCollider2D *box = game.world.get<BoxCollider2D>(actor);
+    if (!position || !box || !fits_court(*box)) {
+      continue;
+    }
+
+    const float step = std::max(0.0f, drive->speed) * tick_seconds;
+    if (drive->computer) {
+      move_cpu(*position, *box, next, step);
+    } else {
+      move_paddle(*position, *box, direction * step);
+    }
+
+    // The first return wins; the other paddles still get to move.
+    if (!waiting && !hit) {
+      hit = return_hit(ball, before, next, sdk::bounds(*position, *box));
+    }
+  }
+}
+
+// Award a point when the whole ball leaves the court, then set up the next serve.
+void check_goal(Transform2D &ball, const sdk::Box &box) {
+  // A point counts only when the whole ball has left the court.
+  if (box.right < 0.0f) {
+    cpu_score += 1;
+    serve_direction = -1;
+  } else if (box.left > 320.0f) {
+    player_score += 1;
+    serve_direction = 1;
+  } else {
+    return;
+  }
+  ball = serve_position;
+  waiting = true;
+}
+
+// Set up paddle controls and load the court for a new match.
+void init() {
+  set_screen_mode(ScreenMode::hires, Size(320, 240));
+  static sdk::ComponentPool<PaddleDrive> drives(game.world, game.world.capacity());
+  game.open(start_match);
+}
+
+// Run one match tick, including input, paddle hits, goals and reset.
+void update(uint32_t) {
+  Transform2D *ball = game.position("ball");
+  const BoxCollider2D *box = game.collider("ball");
+  if (!ball || !box || !fits_court(*box)) {
+    return;
+  }
+
+  if (sdk::button_pressed(Button::B)) {
+    *ball = serve_position;
+    reset_match();
+    return;
+  }
+
+  serve();
+  const sdk::Box before = sdk::bounds(*ball, *box);
+  sdk::Box next = before;
+  if (!waiting) {
+    advance_ball(*ball, *box);
+    next = sdk::bounds(*ball, *box);
+  }
+  update_paddles(*ball, before, next);
+
+  if (!waiting) {
+    // A paddle hit may have moved the ball back onto the court.
+    check_goal(*ball, sdk::bounds(*ball, *box));
+  }
+}
+
+// Draw the court and actors, then add the score and serve prompt.
 void render(uint32_t time) {
   screen.pen = Pen(16, 25, 45);
   screen.clear();
-  if (!art.court) {
-    screen.pen = Pen(255, 224, 151);
-    screen.text("Create and save the Pong scene, court and clips first.", minimal_font, Point(12, 12));
-    screen.text("Run from your project folder. See the game log for details.", minimal_font, Point(12, 23));
-    return;
+  if (!game.draw(time)) {
+    return; // Leave the SDK's scene error visible instead of drawing a scoreboard on it.
   }
-  draw_court(*art.court);
-  world.each<Transform2D, Sprite>([&](sdk::Entity, const Transform2D &pos, const Sprite &sprite) {
-    const std::string_view asset = sprite.asset;
-    if (asset == "assets/paddle") sdk::draw_sprite(screen, *paddle_sheet, art.paddle, pos, sprite, Point(0, 0), time);
-    else if (asset == "assets/ball") sdk::draw_sprite(screen, *ball_sheet, art.ball, pos, sprite, Point(0, 0), time);
-  });
+
   char hud[64];
   std::snprintf(hud, sizeof(hud), "YOU %u   TEAM PONG   %u CPU", player_score, cpu_score);
   screen.pen = Pen(208, 248, 248);
-  screen.text(hud, fat_font, Point(width / 2, 3), true, TextAlign::top_center);
-  screen.text("UP / DOWN: MOVE   Z: SERVE   X: RESET", minimal_font, Point(width / 2, 229), true, TextAlign::top_center);
-  if (waiting) screen.text("PRESS Z TO SERVE", fat_font, Point(width / 2, 95), true, TextAlign::top_center);
+  screen.text(hud, fat_font, Point(160, 3), true, TextAlign::top_center);
+  screen.text("UP / DOWN: MOVE   Z: SERVE   X: RESET", minimal_font,
+              Point(160, 229), true, TextAlign::top_center);
+  if (waiting) {
+    screen.text("PRESS Z TO SERVE", fat_font, Point(160, 95), true, TextAlign::top_center);
+  }
 }

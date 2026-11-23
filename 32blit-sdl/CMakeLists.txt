@@ -10,6 +10,16 @@ add_library(BlitHalSDL STATIC
 	System.cpp
 )
 
+if(NOT EMSCRIPTEN AND NOT ANDROID)
+	target_sources(BlitHalSDL PRIVATE ../libs/world/input_actions.cpp)
+	target_include_directories(BlitHalSDL PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../libs/world>")
+	if(BLIT_WORLD_TESTS)
+		add_executable(blit_input_actions_tests ../libs/world/tests/input_actions_test.cpp)
+		target_link_libraries(blit_input_actions_tests PRIVATE BlitHalSDL GTest::gtest_main)
+		add_test(NAME InputActions.SDLBindings COMMAND blit_input_actions_tests)
+	endif()
+endif()
+
 function (find_sdl_lib lib_name header_name)
 	string(TOUPPER ${lib_name} VAR_PREFIX)
 
@@ -136,6 +146,15 @@ if(SDL2_NET_DLL)
 	list(APPEND DLLS_TO_COPY ${SDL2_NET_DLL})
 endif()
 
+if(TARGET blit_input_actions_tests)
+	foreach(DLL IN LISTS DLLS_TO_COPY)
+		add_custom_command(TARGET blit_input_actions_tests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${DLL}" "$<TARGET_FILE_DIR:blit_input_actions_tests>"
+			VERBATIM)
+	endforeach()
+endif()
+
 set(DLLS_TO_COPY ${DLLS_TO_COPY} PARENT_SCOPE)
 
 # copy once for install
@@ -236,6 +255,7 @@ function(blit_executable NAME)
 endfunction()
 
 function(blit_metadata TARGET FILE)
+	_blit_require_tools()
 	if(NOT EXISTS ${FILE})
 		set(FILE ${CMAKE_CURRENT_SOURCE_DIR}/${FILE})
 	endif()

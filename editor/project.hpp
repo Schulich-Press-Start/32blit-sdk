@@ -13,11 +13,14 @@ namespace editor {
     bool loaded() const { return !root_.empty(); }
 #ifndef __EMSCRIPTEN__
     bool build_configured() const { return !target_.empty(); }
-    bool play_configured() const { return !play_exe_.empty() || build_configured(); }
-    bool packaged_play() const { return !play_exe_.empty(); }
+    bool has_scene_preview() const { return !preview_exe_.empty(); }
+    bool has_packaged_game() const { return !play_exe_.empty(); }
     bool active() const { return process_.active(); }
     bool running() const;
-    void start(bool dev, const std::string &address);
+    bool scene_preview_running() const;
+    enum class Launch { ScenePreview, PackagedGame, Build, Dev };
+    void start(Launch mode, const std::string &address);
+    void restart_scene_preview();
     void reconfigure();
     void stop();
     void tick();
@@ -28,9 +31,11 @@ namespace editor {
     const std::filesystem::path &root() const { return root_; }
     const std::string &scene() const { return scene_; }
     const std::string &registry() const { return registry_; }
+    const std::vector<std::string> &collision_categories() const { return collision_categories_; }
   private:
     std::filesystem::path root_;
     std::string name_, scene_, registry_, status_;
+    std::vector<std::string> collision_categories_;
 #ifndef __EMSCRIPTEN__
     enum class Phase { Idle, Configure, Build, Play, Dev };
     void configure();
@@ -38,9 +43,10 @@ namespace editor {
     void launch_play(const std::string &exe, const char *status);
     Process process_;
     Phase phase_ = Phase::Idle;
-    std::string preset_, build_, exe_, play_exe_, target_, address_, log_;
+    Launch mode_ = Launch::Build;
+    std::string preset_, build_, exe_, play_exe_, preview_exe_, target_, address_, log_;
     std::vector<std::string> scene_watch_;
-    bool dev_ = false, ready_ = false;
+    bool ready_ = false;
     bool configure_only_ = false;
 #endif
   };

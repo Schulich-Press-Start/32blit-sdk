@@ -74,6 +74,16 @@ TEST(Registry, HandlesStringFields) {
   EXPECT_EQ(name->size, sdk::string_field_size);
 }
 
+TEST(Registry, SpriteLayerIsSignedAndDefaultsToZero) {
+  const auto *sprite = sdk::component_info<sdk::Sprite>();
+  ASSERT_NE(sprite, nullptr);
+  const auto *layer = sdk::find_field(*sprite, "layer");
+  ASSERT_NE(layer, nullptr);
+  EXPECT_EQ(layer->type, sdk::FieldType::Int32);
+  EXPECT_EQ(layer->offset, offsetof(sdk::Sprite, layer));
+  EXPECT_EQ(sdk::Sprite{}.layer, 0);
+}
+
 TEST(Registry, HandlesTheMaximumNumberOfFields) {
   auto wide = sdk::find_component("Wide");
   ASSERT_NE(wide, nullptr);

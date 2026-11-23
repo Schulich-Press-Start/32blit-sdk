@@ -1,16 +1,18 @@
-# 32blit Windows playtest kit
+# Legacy 32blit Windows playtest kit
+
+These launchers belong to the earlier multi-game playtest ZIP. For the **Scene Workshop** ZIP, open `START HERE.html` and use [the scene-first tutorial](Pong.md); no `.cmd` launcher is needed.
 
 Extract the entire ZIP to a writable folder. Run the `.cmd` launchers from the extracted kit, not from the ZIP viewer. The kit targets Windows x64 and does not need CMake or Python to edit projects or run the supplied games.
 
 | Launcher | What to try |
 |---|---|
-| `Build Pong in Editor.cmd` | Start with a blank scene and follow the [click-by-click editor setup](Pong.md#set-up-pong-in-the-editor). No compiler needed. |
-| `Edit Pong.cmd` | Open the completed Pong reference: explore entities, prefab defaults, colliders, sprite clips, the court, and source files. |
+| `Build Pong in Editor.cmd` | Start the earlier kit's blank Pong scene. Use the guide bundled with that version. |
+| `Edit Pong.cmd` | Inspect entities, prefab defaults, colliders, sprite clips, and the court in the legacy kit. |
 | `Play Pong.cmd` | Run the included Pong build. |
 | `Edit Platformer.cmd` | Explore a larger project. Edit solid tiles, the player’s box, or sprite clips. Use **File → Save All** before playtesting. |
 | `Play Platformer.cmd` | Move with arrows or WASD; jump with Z. |
 
-The illustrated [Pong tutorial](Pong.md) has two routes: build gameplay in C++ from `pong-starter` with the SDK and Windows build tools, or use **Build Pong in Editor.cmd** to author sprites, actors, and the court from scratch with a bundled game. **Edit Pong.cmd** opens the separate, completed reference.
+The [current tutorial](Pong.md) creates a generic buildable project, starting with animated coins before adding Pong rules.
 
 Going beyond Pong? Read [SDK coding conventions](SDKConventions.md) for game code patterns and the [Editor Guide](../editor/README.md) for general authoring controls.
 

@@ -14,22 +14,6 @@
 
 namespace sdk {
 
-  /// Runtime handle. Only the issuing World accepts it; never persist it.
-  struct Entity {
-    Entity() = default;
-    uint32_t generation() const { return generation_; }
-    uint16_t index() const { return index_; }
-    explicit operator bool() const { return generation_ != 0; }
-
-  private:
-    friend class World;
-    Entity(uint32_t generation, uint16_t index, uint32_t world_id)
-      : generation_(generation), index_(index), world_id_(world_id) {}
-    uint32_t generation_ = 0;
-    uint16_t index_ = UINT16_MAX;
-    uint32_t world_id_ = 0;
-  };
-
   class ComponentPoolBase;
   template<class T> class ComponentPool;
 

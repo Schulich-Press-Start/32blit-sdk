@@ -8,8 +8,17 @@
 
 namespace blit {
   namespace {
+    constexpr uint16_t legacy_version = 1, current_version = 2;
+
     uint16_t read_le16(const uint8_t *data) {
       return uint16_t(data[0]) | (uint16_t(data[1]) << 8);
+    }
+
+    int32_t read_signed_le32(const uint8_t *data) {
+      const uint32_t bits = uint32_t(data[0]) | (uint32_t(data[1]) << 8) |
+                            (uint32_t(data[2]) << 16) | (uint32_t(data[3]) << 24);
+      // Keep both unsigned-to-signed casts within range (including INT32_MIN).
+      return bits <= INT32_MAX ? static_cast<int32_t>(bits) : -1 - static_cast<int32_t>(UINT32_MAX - bits);
     }
 
     bool valid_utf8(const uint8_t *data, std::size_t size) {
@@ -43,9 +52,12 @@ namespace blit {
 
   std::unique_ptr<Map> load_tiled_map(const uint8_t *data, std::size_t size) {
     constexpr std::size_t header_size = 12;
-    if (!data || size < header_size || std::memcmp(data, "BTMP", 4) != 0 ||
-        read_le16(data + 4) != 1)
+    if (!data || size < header_size || std::memcmp(data, "BTMP", 4) != 0)
       return nullptr;
+    const auto version = read_le16(data + 4);
+    if (version != legacy_version && version != current_version)
+      return nullptr;
+    const std::size_t order_size = version == current_version ? 4 : 0;
 
     const uint16_t width = read_le16(data + 6);
     const uint16_t height = read_le16(data + 8);
@@ -58,25 +70,28 @@ namespace blit {
     const uint32_t area = uint32_t(width) * height;
     data += header_size;
     size -= header_size;
-    // Each layer needs at least a name-length byte and two complete planes.
+    // Each layer needs a nonempty length-prefixed name, optional order, and both planes.
     const std::size_t layer_budget = size / layer_count;
-    if (!layer_budget || area > (layer_budget - 1) / 2)
+    const std::size_t minimum_metadata = 2 + order_size;
+    if (layer_budget < minimum_metadata || area > (layer_budget - minimum_metadata) / 2)
       return nullptr;
 
     const std::size_t cells = area;
     auto map = std::make_unique<Map>(Rect(0, 0, width, height));
     map->layer_order.reserve(layer_count);
     for (uint16_t i = 0; i < layer_count; ++i) {
-      if (!size)
+      if (size < 1 + order_size)
         return nullptr;
       const uint8_t name_size = *data++;
-      --size;
-      if (!name_size || name_size > size || (size - name_size) / 2 < cells ||
+      const std::size_t available = size - 1 - order_size;
+      if (!name_size || name_size > available || (available - name_size) / 2 < cells ||
           std::memchr(data, 0, name_size) || !valid_utf8(data, name_size))
         return nullptr;
 
       std::string name(reinterpret_cast<const char *>(data), name_size);
       data += name_size;
+      const int32_t order = order_size ? read_signed_le32(data) : int32_t(layer_count - i);
+      data += order_size;
       const uint8_t *transforms = data + cells;
       const uint8_t *end = transforms + cells;
       if (std::any_of(transforms, end, [](uint8_t value) { return value > 7; }))
@@ -88,11 +103,12 @@ namespace blit {
       auto &layer = it->second;
       layer.map = map.get();
       layer.name = name;
+      layer.layer = order;
       layer.tiles.assign(data, transforms);
       layer.transforms.assign(transforms, end);
       map->layer_order.push_back(std::move(name));
       data = end;
-      size -= name_size + 2 * cells;
+      size = available - name_size - 2 * cells;
     }
     if (size != 0)
       return nullptr;
@@ -104,7 +120,7 @@ namespace blit {
     if(w <= 0 || h <= 0 || w > 65535 || h > 65535 || w > INT32_MAX / h ||
        map.layer_order.empty() || map.layer_order.size() > 65535 || map.layer_order.size() != map.layers.size()) return {};
     const size_t cells = size_t(w) * h;
-    std::vector<uint8_t> bytes{'B','T','M','P',1,0};
+    std::vector<uint8_t> bytes{'B','T','M','P',current_version,0};
     for(auto value : {unsigned(w), unsigned(h), unsigned(map.layer_order.size())}) {
       bytes.push_back(uint8_t(value));
       bytes.push_back(uint8_t(value >> 8));
@@ -119,6 +135,9 @@ namespace blit {
          std::any_of(layer->second.transforms.begin(), layer->second.transforms.end(), [](uint8_t t) { return t > 7; })) return {};
       bytes.push_back(uint8_t(name.size()));
       bytes.insert(bytes.end(), name.begin(), name.end());
+      const auto order = static_cast<uint32_t>(layer->second.layer);
+      for (unsigned shift = 0; shift < 32; shift += 8)
+        bytes.push_back(uint8_t(order >> shift));
       bytes.insert(bytes.end(), layer->second.tiles.begin(), layer->second.tiles.end());
       bytes.insert(bytes.end(), layer->second.transforms.begin(), layer->second.transforms.end());
     }

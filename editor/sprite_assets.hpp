@@ -69,6 +69,7 @@ namespace editor {
     std::map<std::string, Tab> tabs_;
     std::string active_tab_, pending_tab_, error_, new_path_, new_image_, new_error_;
     std::vector<std::string> pngs_;
+    bool new_external_ = false;
     bool refresh_pending_ = false;
   };
 }

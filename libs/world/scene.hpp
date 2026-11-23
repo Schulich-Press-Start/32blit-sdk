@@ -20,6 +20,8 @@ namespace sdk {
     char message[96] = {};
   };
 
+  class SceneDocument;
+
   /// Return text for a project-relative path. The parser consumes it before
   /// returning; every returned view must remain valid until that call ends.
   struct SceneReader {
@@ -27,6 +29,9 @@ namespace sdk {
     bool (*read)(void *context, std::string_view path, std::string_view &text) = nullptr;
     /// SceneRuntime calls this after loading: publish staged assets only on success.
     void (*finish)(void *context, bool success) noexcept = nullptr;
+    /// Called on a newly read catalogue (including its includes/prefabs), before
+    /// replacing any entities. Return false with an error to cancel the load.
+    bool (*prepare)(void *context, const SceneDocument &scene, SceneError &error) = nullptr;
   };
 
   struct SceneSource { char path[scene_path_size]; uint32_t parent; };
@@ -124,6 +129,12 @@ namespace sdk {
     Entity spawn(std::string_view prefab, float x, float y, SceneError &error);
     int save(char *buf, int cap) const;
     bool restore(std::string_view text, SceneError &error);
+    /// Visit surviving authored placements in document order (including included
+    /// entities); spawned entities have no placement. Do not load/restore in fn.
+    template<class F> void each_placement(F &&fn) const {
+      for(size_t i = 0; i < active_.objects().size(); ++i)
+        if(world_.alive(bindings_[i])) fn(bindings_[i]);
+    }
 
   private:
     World &world_;

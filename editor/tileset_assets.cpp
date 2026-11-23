@@ -1,4 +1,5 @@
 #include "tileset_assets.hpp"
+#include "windows_png_picker.hpp"
 
 #include <imgui.h>
 #include <nlohmann/json.hpp>
@@ -7,13 +8,6 @@
 #include <stdexcept>
 #include <string_view>
 #include <misc/cpp/imgui_stdlib.h>
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <commdlg.h>
-#endif
 
 namespace editor {
   namespace {
@@ -413,19 +407,9 @@ namespace editor {
     }
 #ifdef _WIN32
     if(ImGui::Button("Browse for PNG...")) {
-      wchar_t name[32768]{};
-      OPENFILENAMEW dialog{};
-      dialog.lStructSize = sizeof(dialog);
-      dialog.hwndOwner = GetActiveWindow();
-      dialog.lpstrFilter = L"PNG images (*.png)\0*.png\0";
-      dialog.lpstrFile = name;
-      dialog.nMaxFile = static_cast<DWORD>(std::size(name));
-      dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-      if(GetOpenFileNameW(&dialog)) {
-        const fs::path source(name);
-        const auto relative = source.lexically_relative(root_);
-        choose_png(!relative.empty() && *relative.begin() != ".." ? relative.generic_u8string() : source.generic_u8string());
-      } else if(CommDlgExtendedError()) import_error_ = "Could not open the system file picker.";
+      try {
+        if(auto source = browse_png(root_); !source.empty()) choose_png(std::move(source));
+      } catch(const std::exception &error) { import_error_ = error.what(); }
     }
 #elif !defined(__EMSCRIPTEN__)
     if(ImGui::InputText("External PNG path (optional)", &import_source_)) {

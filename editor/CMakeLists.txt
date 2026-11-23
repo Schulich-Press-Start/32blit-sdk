@@ -54,8 +54,10 @@ add_subdirectory(../libs/world world)
 
 add_executable(${editor_target}
   main.cpp
+  appearance.cpp
   project.cpp
   documents.cpp
+  ui_preview.cpp
   scene_canvas.cpp
   scene_preview.cpp
   preview_image.cpp
@@ -96,6 +98,8 @@ endif()
 
 if(WIN32)
   enable_language(RC)
+  get_filename_component(editor_source_sdk "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+  target_compile_definitions(32blit-editor PRIVATE "BLIT_EDITOR_SOURCE_SDK=\"${editor_source_sdk}\"")
   target_sources(32blit-editor PRIVATE editor.rc)
   target_link_libraries(32blit-editor PRIVATE ws2_32 comdlg32 ole32 uuid)
   get_target_property(editor_sdl_type ${editor_sdl} TYPE)

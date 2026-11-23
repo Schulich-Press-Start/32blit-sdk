@@ -14,8 +14,9 @@
 namespace sdk {
   SDK_COMPONENT(Name, value);
   SDK_COMPONENT(Transform2D, x, y, rotation);
-  SDK_COMPONENT(BoxCollider2D, offset_x, offset_y, width, height);
-  SDK_COMPONENT(Sprite, asset, clip, offset_x, offset_y);
+  SDK_COMPONENT(BoxCollider2D, offset_x, offset_y, width, height, category);
+  SDK_COMPONENT(Sprite, asset, clip, offset_x, offset_y, layer);
+  SDK_COMPONENT(Camera2D, clamp_to_map, follow);
 
   namespace {
     const ComponentInfo *registry[max_components];

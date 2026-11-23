@@ -1,0 +1,7 @@
+scene 1 TowerDefense
+entity spawn
+  Transform2D x=24 y=88
+  Sprite asset=assets/gates clip=spawn offset_x=-8 offset_y=-8
+entity goal
+  Transform2D x=296 y=152
+  Sprite asset=assets/gates clip=goal offset_x=-8 offset_y=-8

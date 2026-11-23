@@ -1,4 +1,5 @@
 #include "sprite_assets.hpp"
+#include "windows_png_picker.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -8,12 +9,6 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
 
 namespace editor {
   namespace {
@@ -29,8 +24,14 @@ namespace editor {
         throw std::runtime_error("Expected a project-relative path.");
       const auto path = fs::u8path(name);
       if(path.has_root_path()) throw std::runtime_error("Expected a project-relative path.");
-      for(const auto &part : path)
+      for(const auto &part : path) {
         if(part == "..") throw std::runtime_error("Path cannot contain '..'.");
+#ifdef _WIN32
+        const auto &component = part.native();
+        if(part != "." && !component.empty() && (component.back() == L'.' || component.back() == L' '))
+          throw std::runtime_error("Path components cannot end with a space or dot.");
+#endif
+      }
       return path.lexically_normal();
     }
 
@@ -65,15 +66,22 @@ namespace editor {
       return bytes;
     }
 
-    PreviewImage load_png(SDL_Renderer *renderer, const fs::path &root, const std::string &name) {
-      const auto path = project_file(root, relative_path(name));
+    std::vector<uint8_t> read_png(const fs::path &path) {
       auto ext = path.extension().u8string();
       for(auto &c : ext) if(c >= 'A' && c <= 'Z') c += 'a' - 'A';
       if(ext != ".png") throw std::runtime_error("The sprite atlas must be a PNG.");
+      return read_asset<std::vector<uint8_t>>(path, max_png_size);
+    }
+
+    PreviewImage decode_png(SDL_Renderer *renderer, const std::vector<uint8_t> &bytes) {
       PreviewImage image;
-      const auto error = image.load_png(renderer, read_asset<std::vector<uint8_t>>(path, max_png_size));
+      const auto error = image.load_png(renderer, bytes);
       if(!error.empty()) throw std::runtime_error(error);
       return image;
+    }
+
+    PreviewImage load_png(SDL_Renderer *renderer, const fs::path &root, const std::string &name) {
+      return decode_png(renderer, read_png(project_file(root, relative_path(name))));
     }
 
     unsigned check_grid(const sdk::SpriteClips &descriptor, const PreviewImage &image, unsigned width, unsigned height) {
@@ -88,7 +96,7 @@ namespace editor {
       return count;
     }
 
-    void write_descriptor(const fs::path &path, const std::string &text, const std::optional<std::string> &original) {
+    void write_asset(const fs::path &path, std::string_view bytes, const std::optional<std::string> &original = std::nullopt) {
       auto staging = path;
       staging += ".editor-save";
       if(!fs::create_directory(staging)) throw std::runtime_error("Sprite save staging directory already exists.");
@@ -98,19 +106,19 @@ namespace editor {
         ~Cleanup() { std::error_code error; fs::remove(file, error); fs::remove(directory, error); }
       } cleanup{file, staging};
       std::ofstream out(file, std::ios::binary);
-      out.write(text.data(), static_cast<std::streamsize>(text.size()));
+      out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
       out.close();
-      if(!out) throw std::runtime_error("Could not write staged sprite descriptor.");
+      if(!out) throw std::runtime_error("Could not write staged sprite asset.");
       if(original) {
         if(!fs::is_regular_file(fs::symlink_status(path)) || read_asset<std::string>(path, max_descriptor_size) != *original)
           throw std::runtime_error("Sprite descriptor changed on disk. Revert to reload it before saving.");
         fs::rename(file, path);
       } else {
-        // Publish a complete file without replacing a concurrently created descriptor.
-        if(fs::exists(fs::symlink_status(path))) throw std::runtime_error("Sprite descriptor already exists.");
+        // Publish a complete file without replacing a concurrently created asset.
+        if(fs::exists(fs::symlink_status(path))) throw std::runtime_error("Sprite asset already exists: " + path.filename().u8string());
 #if defined(_WIN32)
         if(!MoveFileW(file.c_str(), path.c_str()))
-          throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "Could not publish sprite descriptor");
+          throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "Could not publish sprite asset");
 #elif defined(__EMSCRIPTEN__)
         // This project's MEMFS is single-threaded and does not support hard links.
         fs::rename(file, path);
@@ -182,7 +190,12 @@ namespace editor {
   void SpriteAssets::suggest_draft(std::string image) {
     new_image_ = std::move(image);
     new_error_.clear();
-    const auto source = fs::u8path(new_image_);
+    auto source = fs::u8path(new_image_);
+    new_external_ = source.is_absolute();
+    if(new_external_) {
+      // Projects without an assets folder can still import beside a descriptor at the root.
+      source = fs::is_directory(root_ / "assets") ? fs::path("assets") / source.filename() : source.filename();
+    }
     auto candidate = source;
     candidate.replace_extension(suffix);
     for(unsigned n = 2; ; ++n) {
@@ -202,11 +215,36 @@ namespace editor {
     if(tabs_.count(path) || fs::exists(fs::symlink_status(file))) throw std::runtime_error("Sprite descriptor already exists.");
     if(!fs::is_directory(file.parent_path())) throw std::runtime_error("The destination folder must exist.");
     Tab tab;
-    tab.descriptor.image = new_image_;
-    tab.preview = load_png(renderer_, root_, new_image_);
+    std::vector<uint8_t> imported;
+    fs::path destination;
+    if(new_external_) {
+      const auto source = fs::u8path(new_image_);
+      const auto image = relative_path((requested.parent_path() / source.filename()).generic_u8string());
+      destination = project_file(root_, image);
+      if(fs::exists(fs::symlink_status(destination)))
+        throw std::runtime_error("PNG copy destination already exists. Select the existing project PNG instead.");
+      imported = read_png(source);
+      tab.preview = decode_png(renderer_, imported);
+      tab.descriptor.image = image.generic_u8string();
+    } else {
+      tab.descriptor.image = new_image_;
+      tab.preview = load_png(renderer_, root_, new_image_);
+    }
     tab.width = tab.descriptor.frame_width = tab.preview.width % 8 ? tab.preview.width : 8;
     tab.height = tab.descriptor.frame_height = tab.preview.height % 8 ? tab.preview.height : 8;
-    tab.loaded = tab.dirty = true;
+    tab.loaded = true;
+    tab.dirty = !new_external_;
+    if(new_external_) {
+      tab.original = sdk::write_sprite_clips(tab.descriptor).dump(2) + '\n';
+      write_asset(destination, {reinterpret_cast<const char *>(imported.data()), imported.size()});
+      try { write_asset(file, *tab.original); }
+      catch(...) {
+        std::error_code error;
+        fs::remove(destination, error);
+        throw;
+      }
+      refresh_pending_ = true;
+    }
     tabs_.emplace(path, std::move(tab));
     pending_tab_ = path;
   }
@@ -266,7 +304,7 @@ namespace editor {
         check_grid(tab.descriptor, preview, tab.descriptor.frame_width, tab.descriptor.frame_height);
         auto text = sdk::write_sprite_clips(tab.descriptor).dump(2) + '\n';
         if(text.size() > max_descriptor_size) throw std::runtime_error("Sprite descriptor exceeds 16 MiB.");
-        write_descriptor(project_file(root_, fs::u8path(path)), text, tab.original);
+        write_asset(project_file(root_, fs::u8path(path)), text, tab.original);
         tab.original = std::move(text);
         tab.preview = std::move(preview);
         tab.saved_revision = tab.revision;
@@ -311,6 +349,7 @@ namespace editor {
       if(ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing)) {
         pngs_ = list_pngs();
         new_image_.clear();
+        new_external_ = false;
         new_path_.clear();
         new_error_.clear();
         if(pngs_.size() == 1) suggest_draft(pngs_.front());
@@ -319,15 +358,25 @@ namespace editor {
       if(ImGui::BeginPopup("New sprite descriptor")) {
         ImGui::TextUnformatted("Choose the source PNG, then name the new sprite file.");
         if(pick_png(pngs_, new_image_)) suggest_draft(new_image_);
+#ifdef _WIN32
+        if(ImGui::Button("Browse for PNG...")) {
+          try {
+            if(auto image = browse_png(root_); !image.empty()) suggest_draft(std::move(image));
+          } catch(const std::exception &error) { new_error_ = error.what(); }
+        }
+        if(new_external_) ImGui::TextWrapped("Copy %s beside the new sprite file.", new_image_.c_str() + (new_image_.find_last_of('/') + 1));
+#endif
         const bool enter = ImGui::InputTextWithHint("Sprite file", "Project-relative name", &new_path_, ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SetItemTooltip("Project-relative destination; .sprite.json is added to a name with no extension.");
         ImGui::BeginDisabled(new_image_.empty() || new_path_.empty());
-        const bool add = ImGui::Button("Create draft") || enter;
+        const bool add = ImGui::Button(new_external_ ? "Import" : "Create draft") || enter;
         ImGui::EndDisabled();
         if(add && !new_image_.empty() && !new_path_.empty()) {
           try { create(); ImGui::CloseCurrentPopup(); }
           catch(const std::exception &error) { new_error_ = error.what(); }
         }
+        ImGui::SameLine();
+        if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
         if(!new_error_.empty()) ImGui::TextWrapped("%s", new_error_.c_str());
         ImGui::EndPopup();
       }

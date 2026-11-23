@@ -18,13 +18,23 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(blit_world_tests
 	actions_test.cpp
+	collision_query_test.cpp
+	grid_navigation_test.cpp
+	grid_route_test.cpp
+	map_test.cpp
+	overlap_tracker_test.cpp
 	registry_test.cpp
 	scene_test.cpp
+	tile_movement_test.cpp
 	tile_props_test.cpp
 	value_test.cpp
 	world_test.cpp
+	../../../32blit/types/map.cpp
 )
 target_link_libraries(blit_world_tests PRIVATE BlitWorld GTest::gtest_main)
+if(WIN32)
+	target_compile_definitions(blit_world_tests PRIVATE WIN32)
+endif()
 
 include(GoogleTest)
 gtest_discover_tests(blit_world_tests DISCOVERY_MODE PRE_TEST NO_PRETTY_VALUES)
