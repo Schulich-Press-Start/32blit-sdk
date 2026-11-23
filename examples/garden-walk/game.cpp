@@ -2,6 +2,7 @@
 #include "door.hpp"
 #include "overlap_tracker.hpp"
 #include "grid_navigation.hpp"
+#include "grid_step.hpp"
 #include "ui_screen.hpp"
 #include "audio_cues.hpp"
 #include "progress_store.hpp"
@@ -75,7 +76,13 @@ namespace {
   bool ready = false;
   constexpr int width = 320;
   constexpr int height = 240;
-  constexpr float step = 1.2f; // 120 pixels per second at 100 updates per second.
+  // One tile per step, like an overworld: 16 pixels in 200ms.
+  constexpr int step_ms = 200;
+  constexpr int update_ms = 10;
+  sdk::GridStepState stepping;
+  // A warp lands the player next to the return door, so a direction held through the
+  // warp must be released before it can step back onto that door.
+  bool door_latch = false;
   constexpr auto door_mask = sdk::collision_bit(1); // Door in blit-project.json.
 
   // Only configured doors count as targets for this game's contact rule.
@@ -91,6 +98,8 @@ namespace {
     const Size map = game.map_size();
     navigation.resize(tile ? map.w / tile : 0, tile ? map.h / tile : 0);
     requested_route = false;
+    if (auto *player = game.position("player"); player && game.collider("player"))
+      sdk::grid_place(stepping, *player, *game.collider("player"), game.tile_size());
     contacts.update(game.world.find("player"), door_mask, is_door);
   }
 
@@ -156,6 +165,15 @@ namespace {
 #endif
     return sdk::button_pressed(default_buttons[action]);
   }
+
+  // One direction per step. Left/right wins a diagonal press, matching the menu.
+  sdk::StepDirection requested_direction() {
+    if (action_down(Left)) return sdk::StepDirection::left;
+    if (action_down(Right)) return sdk::StepDirection::right;
+    if (action_down(Up)) return sdk::StepDirection::up;
+    if (action_down(Down)) return sdk::StepDirection::down;
+    return sdk::StepDirection::none;
+  }
 }
 
 // Open the authored garden and select the game's screen size.
@@ -177,7 +195,7 @@ void init() {
 #endif
 }
 
-// Read four-way input and slide along walls by checking one axis at a time.
+// Walk one tile at a time; a held direction keeps going, a blocked direction turns in place.
 void update(uint32_t) {
 #ifdef GARDEN_ACTION_BINDINGS
   if (custom_input) input.update();
@@ -224,17 +242,16 @@ void update(uint32_t) {
     return;
   }
 
-  float dx = 0;
-  float dy = 0;
-  if (action_down(Left)) dx -= step;
-  if (action_down(Right)) dx += step;
-  if (action_down(Up)) dy -= step;
-  if (action_down(Down)) dy += step;
-  if (dx != 0 && dy != 0) {
-    dx *= 0.70710678f;
-    dy *= 0.70710678f;
+  const int tile = game.tile_size();
+  const Size map = game.map_size();
+  sdk::StepDirection requested = requested_direction();
+  if (door_latch) {
+    if (requested == sdk::StepDirection::none) door_latch = false;
+    else requested = sdk::StepDirection::none;
   }
-  if (dx != 0 || dy != 0) game.move_against_tiles(*player, *shape, Vec2(dx, dy));
+  grid_step(stepping, *player, *shape, requested, tile, step_ms,
+            tile ? map.w / tile : 0, tile ? map.h / tile : 0,
+            [](blit::Point cell) { return !game.tile_has_property(cell, "solid"); }, update_ms);
   if (action_pressed(Route)) find_fountain_route(*player);
   enter_door(entity);
 }
