@@ -28,6 +28,20 @@ add_library(BlitWorld STATIC
 target_include_directories(BlitWorld PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(BlitWorld PUBLIC cxx_std_17)
 
+# Locale-independent float conversion also works on older embedded C++17 libraries.
+include("${CMAKE_CURRENT_LIST_DIR}/../game_scene/AssetDependencies.cmake")
+set(vendor "${CMAKE_CURRENT_LIST_DIR}/../../3rd-party")
+target_include_directories(BlitWorld PRIVATE "${vendor}")
+if(NOT EXISTS "${vendor}/nlohmann/json.hpp")
+    FetchContent_MakeAvailable(nlohmann_json)
+    target_link_libraries(BlitWorld PRIVATE nlohmann_json::nlohmann_json)
+endif()
+if(NOT EXISTS "${vendor}/fast_float/fast_float.h")
+    set(FASTFLOAT_INSTALL OFF CACHE BOOL "Install fast_float separately from the SDK")
+    FetchContent_MakeAvailable(fast_float)
+    target_link_libraries(BlitWorld PRIVATE FastFloat::fast_float)
+endif()
+
 # No /Zc:preprocessor here on purpose. SDK_COMPONENT's SDK_EXPAND indirection
 # makes it expand identically under MSVC's traditional and conformant
 # preprocessors (checked with /P on both), and forcing the flag would change

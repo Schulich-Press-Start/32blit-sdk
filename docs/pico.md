@@ -57,6 +57,8 @@ python3 python3-pip python3-setuptools \
 libsdl2-dev libsdl2-image-dev libsdl2-net-dev unzip
 ```
 
+The Pico toolchain probes compiler capabilities using static libraries, so configuration can check C++17 support before the board SDK supplies its linker setup. Keep compiler checks enabled; forcing them off leaves CMake without the feature table required by the World library.
+
 And the 32blit tools:
 
 ```

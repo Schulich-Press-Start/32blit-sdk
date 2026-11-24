@@ -59,6 +59,8 @@ Use `char[sdk::path_field_size]` (`path` in the registry) for project-relative p
 
 To clear a live path through the Debug console, use `set player.Sprite.asset ""`. An empty Set action value has the same effect for a Path field. Numeric fields still reject an empty value, and omitting the console value remains an error.
 
+Reflected numeric text is locale-independent. Floats round-trip without heap allocation using the header-only `fast_float` parser and the SDK's existing JSON number converter; this also supports embedded C++17 libraries without floating-point `charconv`. CMake fetches the pinned headers unless they are supplied under `3rd-party`.
+
 ## Playing a desktop scene
 
 Include `game_scene.hpp` in a game built with `blit_scene_game`. This is a complete game that displays the startup scene; its empty `update()` is intentional because it has no gameplay rules:

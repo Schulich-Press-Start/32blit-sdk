@@ -10,6 +10,8 @@
 #include <charconv>
 #include <cmath>
 #include <cstring>
+#include <fast_float/fast_float.h>
+#include <nlohmann/json.hpp>
 
 namespace sdk {
   SDK_COMPONENT(Name, value);
@@ -22,15 +24,26 @@ namespace sdk {
     const ComponentInfo *registry[max_components];
     uint16_t registry_count;
 
+    std::string_view bounded_text(const char *text, size_t cap) {
+      size_t length = 0;
+      while(length < cap && text[length]) ++length;
+      return {text, length};
+    }
+
     /// Reads a whole number or float, rejecting anything left over.
     template<class T>
     bool parse_number(const char *text, void *dst) {
       const char *end = text + strlen(text);
 
       T value{};
-      auto [stopped_at, error] = std::from_chars(text, end, value);
+      const auto result = [&] {
+        if constexpr(std::is_floating_point_v<T>)
+          return fast_float::from_chars(text, end, value);
+        else
+          return std::from_chars(text, end, value);
+      }();
 
-      if(error != std::errc{} || stopped_at != end)
+      if(result.ec != std::errc{} || result.ptr != end)
         return false;
 
       memcpy(dst, &value, sizeof(T));
@@ -59,6 +72,29 @@ namespace sdk {
       memcpy(buf, text, length);
       buf[length] = '\0';
       return length;
+    }
+
+    template<>
+    int format_number<float>(const void *src, char *buf, int cap) {
+      float value;
+      memcpy(&value, src, sizeof(value));
+      if(!std::isfinite(value)) {
+        const bool negative = std::signbit(value);
+        const char *text = std::isnan(value) ? (negative ? "-nan" : "nan")
+                                           : (negative ? "-inf" : "inf");
+        return copy_text(text, negative ? 4 : 3, buf, cap);
+      }
+
+      char scratch[32];
+      char *text = cap >= static_cast<int>(sizeof(scratch)) ? buf : scratch;
+      char *end = nlohmann::detail::to_chars(text, text + sizeof(scratch), value);
+      // JSON preserves float type with a .0 suffix; scene fields already have a type.
+      if(end - text >= 2 && end[-2] == '.' && end[-1] == '0') end -= 2;
+      if(text == buf) {
+        *end = '\0';
+        return static_cast<int>(end - text);
+      }
+      return copy_text(text, static_cast<int>(end - text), buf, cap);
     }
   }
 
@@ -117,7 +153,7 @@ namespace sdk {
       case FieldType::String:
       case FieldType::Path: {
         const auto capacity = static_cast<size_t>(text_field_size(type));
-        const std::string_view value(text, strnlen(text, capacity));
+        const auto value = bounded_text(text, capacity);
         if(value.size() >= capacity || (type == FieldType::Path && !value.empty() && !valid_project_relative_path(value)))
           return false;
 
@@ -153,13 +189,13 @@ namespace sdk {
       case FieldType::String: {
         auto chars = static_cast<const char *>(src);
         // a field filled to the brim has no terminator of its own
-        const auto length = static_cast<int>(strnlen(chars, string_field_size));
+        const auto length = static_cast<int>(bounded_text(chars, string_field_size).size());
         return copy_text(chars, length, buf, cap);
       }
 
       case FieldType::Path: {
         const auto *chars = static_cast<const char *>(src);
-        const auto length = static_cast<int>(strnlen(chars, path_field_size));
+        const auto length = static_cast<int>(bounded_text(chars, path_field_size).size());
         if(length == path_field_size || (length && !valid_project_relative_path({chars, static_cast<size_t>(length)}))) return -1;
         return copy_text(chars, length, buf, cap);
       }
