@@ -1,0 +1,4 @@
+{
+  "tileset": "assets/garden.tileset.json",
+  "connections": {"east": {"scene": "scenes/connected/meadow.scene", "offset_px": 128}}
+}

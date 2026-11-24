@@ -62,6 +62,15 @@ namespace blit {
       return (api.get_max_us_timer() - from) + to;
   }
 
+  bool get_wall_clock(int64_t &unix_seconds) {
+    constexpr uint16_t wall_clock_api_minor = 3;
+    // Older HAL tables do not contain this slot.
+    if(api.version_major != api_version_major || api.version_minor < wall_clock_api_minor)
+      return false;
+
+    return api.get_wall_clock && api.get_wall_clock(unix_seconds);
+  }
+
   uint32_t random() {
     return api.random();
   }

@@ -1,0 +1,15 @@
+{
+  "target": "team_pong",
+  "scene": "scenes/pong.scene",
+  "scene_watch": ["assets/paddle.sprite.json", "assets/ball.sprite.json"],
+  "windows": {
+    "preset": "windows",
+    "build_dir": "build-windows",
+    "exe": "build-windows/Debug/team_pong.exe"
+  },
+  "linux": {
+    "preset": "linux",
+    "build_dir": "build-linux",
+    "exe": "build-linux/team_pong"
+  }
+}

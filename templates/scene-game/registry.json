@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "components": {
+    "Name": {"value": "string"},
+    "Transform2D": {"x": "float", "y": "float", "rotation": "float"},
+    "BoxCollider2D": {"offset_x": "float", "offset_y": "float", "width": "float", "height": "float", "category": "uint32"},
+    "Camera2D": {"clamp_to_map": "bool", "follow": "entity"},
+    "Sprite": {"asset": "path", "clip": "string", "offset_x": "float", "offset_y": "float", "layer": "int32", "flip_x": "bool"}
+  },
+  "defaults": {
+    "Name": {"value": ""},
+    "Transform2D": {"x": "0", "y": "0", "rotation": "0"},
+    "BoxCollider2D": {"offset_x": "0", "offset_y": "0", "width": "8", "height": "8", "category": "0"},
+    "Camera2D": {"clamp_to_map": "true"},
+    "Sprite": {"asset": "", "clip": "", "offset_x": "0", "offset_y": "0", "layer": "0", "flip_x": "false"}
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Tower Defense",
+  "target": "game",
+  "scene": "scenes/main.scene",
+  "registry": "registry.json",
+  "windows": {
+    "preset": "windows",
+    "build_dir": "build-windows",
+    "exe": "build-windows/Debug/game.exe"
+  },
+  "linux": {
+    "preset": "linux",
+    "build_dir": "build-linux",
+    "exe": "build-linux/game"
+  }
+}

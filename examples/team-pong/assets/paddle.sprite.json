@@ -1,0 +1,11 @@
+{
+  "image": "assets/paddles.png",
+  "frame_width": 10,
+  "frame_height": 36,
+  "clips": {
+    "pulse": {"loop": true, "frames": [
+      {"cell": 0, "duration_ms": 440}, {"cell": 1, "duration_ms": 220}
+    ]},
+    "steady": {"loop": true, "frames": [{"cell": 0, "duration_ms": 440}]}
+  }
+}

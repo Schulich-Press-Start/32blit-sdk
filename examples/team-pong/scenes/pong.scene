@@ -1,0 +1,16 @@
+scene 1 Pong
+prefab paddle
+  Transform2D
+  Sprite asset=assets/paddle clip=pulse offset_x=-5 offset_y=-18
+  BoxCollider2D width=10 height=36 offset_x=-5 offset_y=-18
+  PaddleDrive
+entity player : paddle
+  Transform2D x=24 y=120
+entity opponent : paddle
+  Transform2D x=296 y=120
+  PaddleDrive speed=92 computer=true
+  Sprite clip=steady
+entity ball
+  Transform2D x=160 y=120
+  Sprite asset=assets/ball clip=spin offset_x=-4 offset_y=-4
+  BoxCollider2D width=8 height=8 offset_x=-4 offset_y=-4

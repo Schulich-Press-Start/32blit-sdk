@@ -16,7 +16,7 @@
 
 #include "display.hpp"
 #include "panel.hpp"
-#include "screen_fit.hpp"
+#include "graphics/screen_fit.hpp"
 
 namespace blit_linux {
 
@@ -164,7 +164,7 @@ namespace blit_linux {
    * The screen is drawn at 1x into the buffer's top-left corner; the plane
    * reads that `screen`-sized area and shows it at `fit`'s scale and position.
    */
-  inline PlaneRects scaled_plane_rects(blit::Size screen, const ScreenFit &fit) {
+  inline PlaneRects scaled_plane_rects(blit::Size screen, const blit::ScreenFit &fit) {
     PlaneRects rects;
     rects.src = {0, 0, uint32_t(screen.w) << 16, uint32_t(screen.h) << 16};
     rects.dst = {uint32_t(fit.x), uint32_t(fit.y), uint32_t(screen.w * fit.scale), uint32_t(screen.h * fit.scale)};
@@ -186,7 +186,7 @@ namespace blit_linux {
    * driver offers nearest-neighbour filtering, so pixels stay sharp. `on`
    * asks for every size, including 1x (useful to test the plane path).
    */
-  inline bool want_plane_scaling(ScalerMode mode, const ScreenFit &fit, bool nearest_filter) {
+  inline bool want_plane_scaling(ScalerMode mode, const blit::ScreenFit &fit, bool nearest_filter) {
     switch(mode) {
       case ScalerMode::off:
         return false;

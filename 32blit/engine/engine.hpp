@@ -23,6 +23,10 @@ namespace blit {
   uint32_t now_us();
   uint32_t us_diff(uint32_t from, uint32_t to);
 
+  /// Reads signed Unix seconds (UTC). Returns false and leaves the output unchanged if unavailable.
+  /// This clock can change independently of game time; use now() for elapsed time.
+  [[nodiscard]] bool get_wall_clock(int64_t &unix_seconds);
+
   uint32_t random();
 
   void debug(std::string message);

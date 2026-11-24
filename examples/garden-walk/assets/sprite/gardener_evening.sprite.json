@@ -1,0 +1,8 @@
+{
+  "image": "assets/sprite/gardener_evening.png",
+  "frame_width": 12,
+  "frame_height": 14,
+  "clips": {
+    "idle": {"loop": true, "frames": [{"cell": 0, "duration_ms": 100}]}
+  }
+}

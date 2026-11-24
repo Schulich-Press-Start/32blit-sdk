@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -150,6 +151,9 @@ namespace blit {
     // low level framebuffer
     uint8_t *(*get_screen_data)(); // used to get current screen.data before render if firmware does page-flipping
     void (*set_framebuffer)(uint8_t *data, uint32_t max_size, Size max_bounds); // pass framebuffer over if allocated on the "user" side of the API
+
+    // optional wall clock (API 0.3); leave output unchanged on failure
+    bool (*get_wall_clock)(int64_t &unix_seconds);
   };
 
   struct APIData {
@@ -181,7 +185,8 @@ namespace blit {
   };
 
 #ifdef BLIT_API_SPLIT_COMPAT
-  static_assert(sizeof(APIConst) == sizeof(APIData));
+  // STM32 shares storage for the legacy const/data prefix. New const slots follow it.
+  static_assert(offsetof(APIConst, get_wall_clock) == sizeof(APIData));
 #else
   static_assert(sizeof(APIData) <= 256);
 #endif

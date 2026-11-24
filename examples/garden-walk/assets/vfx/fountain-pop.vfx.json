@@ -1,0 +1,13 @@
+{
+  "name": "Fountain Pop",
+  "duration_ms": 720,
+  "layers": [
+    {"sprite": "assets/fountain", "clip": "flow", "x": -8, "y": -28, "start_ms": 0},
+    {"sprite": "assets/fountain", "clip": "flow", "x": 5, "y": -36, "start_ms": 180, "clip_offset_ms": 180}
+  ],
+  "audio": "assets/menu.audio.json",
+  "cues": [
+    {"at_ms": 0, "cue": "menu_focus"},
+    {"at_ms": 360, "cue": "menu_confirm"}
+  ]
+}

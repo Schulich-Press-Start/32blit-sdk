@@ -18,6 +18,7 @@
 namespace {
   using blit::Pen;
   using blit::PixelFormat;
+  using blit::ScreenFit;
   using blit::Size;
   using namespace blit_linux;
 

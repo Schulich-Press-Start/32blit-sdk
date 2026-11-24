@@ -1,0 +1,241 @@
+/**
+ * \file registry.hpp
+ * \brief Component registry: the names, sizes and fields of component types.
+ *
+ * A component is a plain struct. `SDK_COMPONENT` records its name and the
+ * name, type and offset of each field, so tools that know nothing about the
+ * type can still read and write it: the editor's inspector, the console, and
+ * scene files.
+ *
+ * ```cpp
+ * struct Transform2D { float x, y, rotation; };
+ * SDK_COMPONENT(Transform2D, x, y, rotation);
+ * ```
+ *
+ * Registration happens before main(), into a fixed array that needs no
+ * initialisation, so registrars may run in any order. Nothing here allocates.
+ */
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <type_traits>
+
+namespace sdk {
+
+  /// Largest number of component types one program may register.
+  constexpr int max_components = 64;
+
+  /// Largest number of fields one component may have (the `SDK_COMPONENT` limit).
+  constexpr int max_component_fields = 16;
+
+  /// Length of a String field, including its terminator.
+  constexpr int string_field_size = 24;
+
+  /// Length of a Path field, including its terminator.
+  constexpr int path_field_size = 64;
+
+  struct Name { char value[string_field_size] = {}; };
+  struct Transform2D { float x = 0, y = 0, rotation = 0; };
+  // Axis-aligned box in world pixels relative to Transform2D; nonpositive dimensions disable it.
+  struct BoxCollider2D {
+    float offset_x = 0, offset_y = 0, width = 8, height = 8;
+    uint32_t category = 0;
+  };
+  // Project-relative sprite descriptor stem (without .sprite.json) and optional clip name.
+  struct Sprite {
+    char asset[path_field_size] = {};
+    char clip[string_field_size] = {};
+    float offset_x = 0, offset_y = 0;
+    // Shared world draw order; smaller values draw nearer the front.
+    int32_t layer = 0;
+    bool flip_x = false;
+  };
+  /// Runtime handle. Only the issuing World accepts it; never persist it.
+  struct Entity {
+    Entity() = default;
+    uint32_t generation() const { return generation_; }
+    uint16_t index() const { return index_; }
+    explicit operator bool() const { return generation_ != 0; }
+
+  private:
+    friend class World;
+    Entity(uint32_t generation, uint16_t index, uint32_t world_id)
+      : generation_(generation), index_(index), world_id_(world_id) {}
+    uint32_t generation_ = 0;
+    uint16_t index_ = UINT16_MAX;
+    uint32_t world_id_ = 0;
+  };
+
+  /// View settings, used only when game code explicitly selects this camera.
+  struct Camera2D { bool clamp_to_map = true; Entity follow{}; };
+
+  /** \brief The types a component field may have. */
+  enum class FieldType : uint8_t {
+    Bool,
+    Int32,
+    UInt32,
+    Float,
+    String,  ///< char[string_field_size]
+    Entity,  ///< Contextual reference, resolved by the scene codec.
+    Path,    ///< char[path_field_size], a project-relative path or empty.
+  };
+
+  /** \brief One field of a component: what it is called, what it holds, where it sits. */
+  struct FieldInfo {
+    const char *name;
+    FieldType type;
+    uint16_t offset;
+  };
+
+  /** \brief One registered component type. */
+  struct ComponentInfo {
+    const char *name;
+    uint16_t id;        ///< Registration order, stable within one program.
+    uint16_t size;      ///< sizeof the struct, for copying one without knowing its type.
+    const FieldInfo *fields;
+    uint8_t field_count;
+  };
+
+  /// Buffer capacity sufficient for a formatted field value and its terminator.
+  constexpr int max_value_text = path_field_size;
+
+  /// Storage size of a String or Path field, including the terminator; zero for other types.
+  constexpr int text_field_size(FieldType type) {
+    return type == FieldType::String ? string_field_size : type == FieldType::Path ? path_field_size : 0;
+  }
+
+  /// Check path syntax only, not existence or the resolution of symlinks.
+  bool valid_project_relative_path(std::string_view path);
+
+  /**
+   * \brief Read a field value from text.
+   *
+   * Accepts `true`, `false`, `1` and `0` for Bool, base-ten digits for the
+   * integers, and any finite form `std::from_chars` reads for Float; `inf` and
+   * `nan` are refused, because no game value is either and a nan spreads
+   * silently. The whole of `text` must be the value. String and Path values
+   * must fit their storage, including the terminator; a nonempty Path must
+   * use project-relative syntax. An empty Path clears the field.
+   *
+   * \param dst Storage for the field's own type, at least as large as it.
+   * \return false if the text isn't a valid value of this type, leaving `dst` untouched.
+   */
+  bool parse_value(FieldType type, const char *text, void *dst);
+
+  /**
+   * \brief Write a field value as text, in the shortest form that reads back
+   *        as the same value.
+   *
+   * \param buf Always terminated when this succeeds; needs max_value_text to fit any value.
+   * \return Bytes written, not counting the terminator, or -1 on invalid input or insufficient space.
+   */
+  int format_value(FieldType type, const void *src, char *buf, int cap);
+
+  /** \brief The name of a field type, for error messages: "bool", "int32", ... */
+  const char *field_type_name(FieldType type);
+
+  /** \brief Find a registered component by name, or nullptr. */
+  const ComponentInfo *find_component(const char *name);
+
+  /** \brief Find a registered component by id, or nullptr. */
+  const ComponentInfo *component_by_id(uint16_t id);
+
+  /** \brief Find a field by its exact name, or nullptr. */
+  const FieldInfo *find_field(const ComponentInfo &component, const char *name);
+
+  /** \brief How many component types are registered. */
+  uint16_t component_count();
+
+  namespace detail {
+    /// Maps a C++ field type to a FieldType. A field of any other type fails to compile.
+    template<class T> struct field_type_of;
+    template<> struct field_type_of<bool>     { static constexpr FieldType value = FieldType::Bool; };
+    template<> struct field_type_of<int32_t>  { static constexpr FieldType value = FieldType::Int32; };
+    template<> struct field_type_of<uint32_t> { static constexpr FieldType value = FieldType::UInt32; };
+    template<> struct field_type_of<float>    { static constexpr FieldType value = FieldType::Float; };
+    template<> struct field_type_of<Entity>   { static constexpr FieldType value = FieldType::Entity; };
+
+    template<size_t N> struct field_type_of<char[N]> {
+      static_assert(N == string_field_size || N == path_field_size,
+                    "text fields must use char[sdk::string_field_size] or char[sdk::path_field_size]");
+      static constexpr FieldType value = N == path_field_size ? FieldType::Path : FieldType::String;
+    };
+
+    template<class T> constexpr FieldType type_of() {
+      static_assert(!std::is_const_v<T> && !std::is_volatile_v<T>, "registered fields must be writable and non-volatile");
+      return field_type_of<T>::value;
+    }
+
+    template<class T> inline const ComponentInfo *registered_component = nullptr;
+
+    /** \brief Adds one component to the registry when its program starts. */
+    struct ComponentRegistrar {
+      ComponentInfo info;
+      ComponentRegistrar(const char *name, uint16_t size,
+                         const FieldInfo *fields, uint8_t field_count, const ComponentInfo *&type_info);
+    };
+  }
+
+  /// Metadata for a C++ type registered with SDK_COMPONENT, or nullptr.
+  template<class T> const ComponentInfo *component_info() {
+    return detail::registered_component<T>;
+  }
+}
+
+/// \cond INTERNAL
+// Calls `m(Type, field)` for each field. The SDK_EXPAND indirection is what
+// makes this work on MSVC's traditional preprocessor, which expands __VA_ARGS__
+// as a single token without it. Builds with /Zc:preprocessor too.
+#define SDK_EXPAND(x) x
+#define SDK_CONCAT_(a, b) a##b
+#define SDK_CONCAT(a, b) SDK_CONCAT_(a, b)
+
+#define SDK_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, N, ...) N
+#define SDK_NARG(...) SDK_EXPAND(SDK_ARG_N(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
+
+#define SDK_FE1(m, T, a) m(T, a)
+#define SDK_FE2(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE1(m, T, __VA_ARGS__))
+#define SDK_FE3(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE2(m, T, __VA_ARGS__))
+#define SDK_FE4(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE3(m, T, __VA_ARGS__))
+#define SDK_FE5(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE4(m, T, __VA_ARGS__))
+#define SDK_FE6(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE5(m, T, __VA_ARGS__))
+#define SDK_FE7(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE6(m, T, __VA_ARGS__))
+#define SDK_FE8(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE7(m, T, __VA_ARGS__))
+#define SDK_FE9(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE8(m, T, __VA_ARGS__))
+#define SDK_FE10(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE9(m, T, __VA_ARGS__))
+#define SDK_FE11(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE10(m, T, __VA_ARGS__))
+#define SDK_FE12(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE11(m, T, __VA_ARGS__))
+#define SDK_FE13(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE12(m, T, __VA_ARGS__))
+#define SDK_FE14(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE13(m, T, __VA_ARGS__))
+#define SDK_FE15(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE14(m, T, __VA_ARGS__))
+#define SDK_FE16(m, T, a, ...) m(T, a) SDK_EXPAND(SDK_FE15(m, T, __VA_ARGS__))
+
+#define SDK_FOR_EACH_FIELD(m, T, ...) SDK_EXPAND(SDK_CONCAT(SDK_FE, SDK_NARG(__VA_ARGS__))(m, T, __VA_ARGS__))
+
+#define SDK_FIELD_INFO(T, field) \
+  ::sdk::FieldInfo{#field, ::sdk::detail::type_of<decltype(T::field)>(), \
+                   static_cast<uint16_t>(offsetof(T, field))},
+/// \endcond
+
+/**
+ * \brief Register a component type and its fields.
+ *
+ * Write it once, at namespace scope, in the source file that defines the
+ * struct: `SDK_COMPONENT(Transform2D, x, y, rotation);`. Up to
+ * sdk::max_component_fields fields, each of a type sdk::FieldType covers.
+ */
+#define SDK_COMPONENT(T, ...)                                                                  \
+  static_assert(std::is_standard_layout_v<T>, #T " must be a standard-layout struct");         \
+  static_assert(sizeof(T) <= UINT16_MAX, #T " exceeds the component size limit");               \
+  static_assert(SDK_NARG(__VA_ARGS__) <= ::sdk::max_component_fields,                          \
+                #T " has more fields than sdk::max_component_fields");                         \
+  static const ::sdk::FieldInfo sdk_fields_##T[] = {                                           \
+    SDK_FOR_EACH_FIELD(SDK_FIELD_INFO, T, __VA_ARGS__)                                         \
+  };                                                                                           \
+  static const ::sdk::detail::ComponentRegistrar sdk_registrar_##T {                           \
+    #T, sizeof(T), sdk_fields_##T,                                                             \
+    static_cast<uint8_t>(sizeof(sdk_fields_##T) / sizeof(::sdk::FieldInfo)),                     \
+    ::sdk::detail::registered_component<T>                                                     \
+  }

@@ -1,0 +1,72 @@
+# Build the optional world library on its own: no SDL, asset tools or port.
+name: World library
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gcc-sanitizers:
+    name: GCC / ASan + UBSan
+    runs-on: ubuntu-24.04
+    env:
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+    - uses: actions/checkout@v7
+    - name: Configure
+      run: >-
+        cmake -S libs/world -B build.world
+        -DBLIT_WORLD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+        -DCMAKE_CXX_COMPILER=g++
+        "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wdouble-promotion -fsanitize=address,undefined -fno-omit-frame-pointer"
+    - name: Build
+      run: cmake --build build.world --parallel 2
+    - name: Test
+      run: ctest --test-dir build.world --output-on-failure --no-tests=error
+
+  msys2:
+    name: MSYS2 UCRT64 / GCC
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja
+    - name: Configure
+      run: >-
+        cmake -S libs/world -B build.world -G Ninja
+        -DBLIT_WORLD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+        "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wdouble-promotion"
+    - name: Build
+      run: cmake --build build.world --parallel 2
+    - name: Test
+      run: ctest --test-dir build.world --output-on-failure --no-tests=error
+
+  msvc:
+    name: MSVC / ${{ matrix.config }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    steps:
+    - uses: actions/checkout@v7
+    - name: Configure
+      run: cmake -S libs/world -B build.world -DBLIT_WORLD_TESTS=ON "-DCMAKE_CXX_FLAGS=/W4 /EHsc"
+    - name: Build
+      run: cmake --build build.world --config ${{ matrix.config }} --parallel 2
+    - name: Test
+      run: ctest --test-dir build.world -C ${{ matrix.config }} --output-on-failure --no-tests=error
