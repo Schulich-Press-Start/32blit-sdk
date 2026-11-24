@@ -240,6 +240,9 @@ void init() {
     if (!audio_ready) std::fprintf(stderr, "Garden Walk audio: %s\n", menu_audio.last_error().c_str());
     if (!fountain_pop.load("assets/vfx/fountain-pop.vfx.json", game))
       std::fprintf(stderr, "Garden Walk fountain: %s\n", fountain_pop.last_error().c_str());
+    for(const auto &checkpoint : checkpoints)
+      if(!game.preload_scene(checkpoint.scene))
+        std::fprintf(stderr, "Garden Walk preload: %s\n", checkpoint.scene);
   }
 #ifdef GARDEN_ACTION_BINDINGS
   if (ready) {

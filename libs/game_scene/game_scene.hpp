@@ -9,6 +9,7 @@
 #include <string_view>
 
 namespace sdk {
+  class ProjectAssets;
   enum class SceneHitKind { None, Entity, Tile };
 
   struct SceneSweepHit {
@@ -28,6 +29,14 @@ namespace sdk {
     /// Loads the manifest's startup scene. on_loaded runs after each successful scene load.
     /// A failed reload leaves the last playable scene and its assets intact.
     bool open(void (*on_loaded)() = nullptr);
+    /// Retain validated scene assets/catalogues for fast travel. No entities are created.
+    /// Returns false if loading fails or the scene exceeds the configured cache budget.
+    bool preload_scene(std::string_view scene);
+    /// Optional retention budget; active scenes and externally held effects are separate.
+    /// Changing it clears retained scenes. Zero disables retention.
+    void set_scene_cache_budget(size_t bytes);
+    size_t cached_scene_bytes() const;
+    std::shared_ptr<ProjectAssets> project_assets() const;
 
     /// Resolve a project-relative asset after open() (also valid in on_loaded).
     /// Returns an absolute UTF-8 path, or an empty string if the path cannot be resolved.
@@ -96,6 +105,7 @@ namespace sdk {
 
   private:
     struct Player;
+    size_t scene_cache_budget_ = 2 * 1024 * 1024;
     std::unique_ptr<Player> player_;
   };
 

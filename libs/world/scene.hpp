@@ -3,6 +3,7 @@
 #include "world.hpp"
 
 #include <string_view>
+#include <memory>
 #include <vector>
 
 namespace sdk {
@@ -53,6 +54,9 @@ namespace sdk {
     SceneDocument &operator=(const SceneDocument &) = delete;
     // Explicit snapshot for host authoring; retains the same borrowed registry.
     void restore_from(const SceneDocument &source);
+    /// Cache a validated catalogue using only its actual object/component/field counts.
+    std::unique_ptr<SceneDocument> compact_copy() const;
+    size_t memory_size() const;
 
     std::string_view title() const { return title_; }
     bool snapshot() const { return snapshot_; }
@@ -127,6 +131,9 @@ namespace sdk {
     SceneRuntime(World &world, SceneLimits limits, SceneReader reader);
     World &world() const { return world_; }
     bool load(std::string_view path, SceneError &error);
+    /// Instantiate a previously validated native catalogue without reading its source again.
+    /// The usual prepare/finish hooks still run; failure preserves the active world.
+    bool load(const SceneDocument &catalogue, SceneError &error);
     Entity spawn(std::string_view prefab, float x, float y, SceneError &error);
     int save(char *buf, int cap) const;
     bool restore(std::string_view text, SceneError &error);

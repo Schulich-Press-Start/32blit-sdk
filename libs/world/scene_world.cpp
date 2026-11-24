@@ -295,6 +295,25 @@ namespace sdk {
     return true;
   }
 
+  bool SceneRuntime::load(const SceneDocument &catalogue, SceneError &error) {
+    SceneReadAttempt attempt{&reader_};
+    const auto limits = staging_.limits_;
+    const auto path = catalogue.sources_.empty() ? std::string_view{} : catalogue.sources_.front().path;
+    if(catalogue.snapshot_ || catalogue.uses_external_metadata() || catalogue.sources_.empty())
+      return scene_error(error, path, 0, "expected a validated native scene catalogue");
+    if(catalogue.objects_.size() > limits.objects || catalogue.components_.size() > limits.components ||
+       catalogue.fields_.size() > limits.fields || catalogue.sources_.size() > limits.sources)
+      return scene_error(error, path, 0, "cached catalogue exceeds scene limits");
+    staging_.restore_from(catalogue);
+    staging_.limits_ = limits;
+    if(reader_.prepare && !reader_.prepare(reader_.context, staging_, error)) return false;
+    if(!instantiate_scene(world_, staging_, staging_bindings_.data(), staging_bindings_.size(), error)) return false;
+    active_.swap(staging_);
+    bindings_.swap(staging_bindings_);
+    attempt.success = true;
+    return true;
+  }
+
   int SceneRuntime::save(char *buf, int cap) const {
     std::fill(snapshot_keys_.begin(), snapshot_keys_.end(), nullptr);
     for(size_t i = 0; i < active_.objects().size(); ++i)

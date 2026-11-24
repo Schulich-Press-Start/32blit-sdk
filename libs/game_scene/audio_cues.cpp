@@ -3,11 +3,11 @@
 #ifdef BLIT_SCENE_SDL_AUDIO
 #include "Audio.hpp"
 #include "game_scene.hpp"
+#include "project_assets.hpp"
 #include "../world/audio_descriptor.hpp"
 
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <limits>
 #include <map>
@@ -29,25 +29,20 @@ namespace sdk {
       Uint32 size = 0;
     };
 
-    std::string regular_asset(const GameScene &game, std::string_view path) {
-      auto resolved = game.project_asset_path(path);
-      if(resolved.empty()) throw std::runtime_error("Cannot resolve this path inside the open project.");
-      if(!fs::is_regular_file(fs::u8path(resolved))) throw std::runtime_error("File is missing or is not a regular file.");
-      return resolved;
-    }
-
-    Clip load_wav(const GameScene &game, std::string_view path) {
+    Clip load_wav(ProjectAssets &assets, std::string_view path) {
       if(path.size() < 4) throw std::runtime_error("Expected a .wav path.");
       const auto suffix = path.substr(path.size() - 4);
       if(suffix[0] != '.' || (suffix[1] != 'w' && suffix[1] != 'W') ||
          (suffix[2] != 'a' && suffix[2] != 'A') || (suffix[3] != 'v' && suffix[3] != 'V')) {
         throw std::runtime_error("Expected a .wav path.");
       }
-      const auto resolved = regular_asset(game, path);
+      const auto &resolved = assets.path(path);
+      if(!fs::is_regular_file(resolved)) throw std::runtime_error("File is missing or is not a regular file.");
       SDL_AudioSpec source{};
       Uint8 *samples = nullptr;
       Uint32 size = 0;
-      if(!SDL_LoadWAV(resolved.c_str(), &source, &samples, &size)) {
+      const auto filename = resolved.u8string();
+      if(!SDL_LoadWAV(filename.c_str(), &source, &samples, &size)) {
         throw std::runtime_error(std::string("Cannot decode WAV: ") + SDL_GetError());
       }
       Clip clip{Buffer{samples, free_wav}, size};
@@ -100,27 +95,24 @@ namespace sdk {
     };
 
     auto next = std::make_unique<Player>();
-    std::ifstream input;
     try {
-      const auto resolved = regular_asset(game, path);
-      input.open(fs::u8path(resolved), std::ios::binary);
-      if(!input) return fail("Cannot open audio descriptor.");
-      const auto json = parse_audio_descriptor(input);
-      if(input.bad()) return fail("Cannot read audio descriptor.");
+      const auto assets = game.project_assets();
+      if(!assets) return fail("No project is open.");
+      const auto text = assets->text(path);
+      const auto json = parse_audio_descriptor(*text);
       for(auto item = json.begin(); item != json.end(); ++item) {
         const auto &id = item.key();
         const auto &wav = audio_cue_path(id, *item);
         try {
-          auto clip = load_wav(game, wav);
+          auto clip = load_wav(*assets, wav);
           next->clips.emplace(id, std::move(clip));
         } catch(const std::runtime_error &error) {
           return fail("Cue '" + id + "', '" + wav + "': " + error.what());
         }
       }
     } catch(const nlohmann::json::parse_error &) {
-      return fail(input.bad() ? "Cannot read audio descriptor." : "Invalid audio descriptor JSON.");
+      return fail("Invalid audio descriptor JSON.");
     } catch(const std::exception &error) {
-      if(input.bad()) return fail("Cannot read audio descriptor.");
       return fail(error.what());
     }
     if(!next->clips.empty() && !Audio::cues_available()) return fail("SDL simulator audio output is unavailable.");

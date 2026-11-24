@@ -16,10 +16,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <filesystem>
-#include <fstream>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <optional>
@@ -28,14 +27,9 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 
-#define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_PNG
-#define STBI_NO_STDIO
-#define STBI_MAX_DIMENSIONS 2048
-#include <stb_image.h>
 
 #include "game_scene.hpp"
+#include "project_assets.hpp"
 #include "map_solidity.hpp"
 #include "scene_text.hpp"
 #include "sprite_preloads.hpp"
@@ -50,7 +44,6 @@ namespace sdk {
     namespace fs = std::filesystem;
     using Json = nlohmann::json;
     constexpr char manifest[] = "blit-project.json";
-    constexpr size_t asset_limit = 16 * 1024 * 1024; // Same file and PNG limits as the desktop editor.
 
     struct FileError : std::runtime_error {
       FileError(std::string_view path, const std::string &reason, uint32_t line = 0)
@@ -102,38 +95,6 @@ namespace sdk {
       throw FileError(manifest, "Open a project folder or keep data/ beside the game executable.");
     }
 
-    // Resolve existing symlinks as well as lexical segments before reading anything.
-    // A missing file can still be resolved, so only an absent companion map is optional.
-    fs::path project_file(const fs::path &root, std::string_view name) {
-      if(name.empty() || name.find_first_of(":\\") != name.npos ||
-         std::any_of(name.begin(), name.end(), [](unsigned char c) { return c < 32 || c == 127; }))
-        throw FileError(name, "Expected a project-relative path using /.");
-      const auto requested = fs::u8path(name);
-      if(requested.has_root_path() || std::find(requested.begin(), requested.end(), "..") != requested.end())
-        throw FileError(name, "Path must stay inside the project.");
-      std::error_code error;
-      const auto path = fs::weakly_canonical(root / requested, error);
-      if(error || !inside(root, path)) throw FileError(name, "Cannot resolve this path inside the project.");
-      return path;
-    }
-
-    std::string read_file(const fs::path &path, std::string_view name, size_t limit = asset_limit) {
-      if(!fs::is_regular_file(path)) throw FileError(name, "File is missing or is not a regular file.");
-      std::ifstream input(path, std::ios::binary | std::ios::ate);
-      const auto size = static_cast<std::streamoff>(input.tellg());
-      if(size < 0) throw FileError(name, "Cannot open file.");
-      if(static_cast<uintmax_t>(size) > limit) throw FileError(name, "File exceeds the supported size limit.");
-      std::string bytes(static_cast<size_t>(size), '\0');
-      if(!input.seekg(0).read(bytes.data(), static_cast<std::streamsize>(size))) throw FileError(name, "Cannot read file.");
-      return bytes;
-    }
-
-    Json read_json(const fs::path &root, std::string_view name) {
-      const auto text = read_file(project_file(root, name), name);
-      auto json = Json::parse(text, nullptr, false);
-      if(json.is_discarded()) throw FileError(name, "Invalid JSON; check this file's syntax.");
-      return json;
-    }
 
     const std::string &path_field(const Json &json, const char *field, std::string_view file) {
       const auto value = json.find(field);
@@ -142,19 +103,12 @@ namespace sdk {
       return value->get_ref<const std::string &>();
     }
 
-    struct FreePixels { void operator()(stbi_uc *p) const { stbi_image_free(p); } };
-    using Pixels = std::unique_ptr<stbi_uc, FreePixels>;
-    struct Sheet {
-      Sheet(Pixels pixels, int width, int height)
-        : pixels(std::move(pixels)), surface(this->pixels.get(), blit::PixelFormat::RGBA, {width, height}) {}
-      Pixels pixels;
-      blit::Surface surface; // borrows pixels; neither the surface nor its data is copied
-    };
-    struct SpriteArt { SpriteClips clips; blit::Surface *sheet = nullptr; };
 
     struct Art {
-      std::map<std::pair<fs::path, int>, Sheet> images;
-      std::map<std::string, SpriteArt, std::less<>> sprites;
+      explicit Art(std::shared_ptr<ProjectAssets> assets) : assets(std::move(assets)) {}
+      std::shared_ptr<ProjectAssets> assets;
+      std::vector<std::shared_ptr<ImageAsset>> images;
+      std::map<std::string, std::shared_ptr<const SpriteAsset>, std::less<>> sprites;
       std::unique_ptr<blit::Map> map;
       std::vector<blit::MapLayer *> layers;
       TilesetDescriptor::Properties tile_properties;
@@ -182,30 +136,23 @@ namespace sdk {
 
       bool tile_is_solid(size_t index) const { return !solid_cells.empty() && solid_cells[index]; }
 
-      blit::Surface &image(const fs::path &root, const std::string &name, int color_key = -1) {
-        auto key = std::make_pair(project_file(root, name), color_key);
-        if(const auto it = images.find(key); it != images.end()) return it->second.surface;
-        const auto bytes = read_file(key.first, name);
-        int w, h;
-        Pixels pixels(stbi_load_from_memory(reinterpret_cast<const stbi_uc *>(bytes.data()),
-            static_cast<int>(bytes.size()), &w, &h, nullptr, STBI_rgb_alpha));
-        if(!pixels) throw FileError(name, "Cannot decode PNG (maximum 2048 x 2048 pixels).");
-        if(color_key >= 0) {
-          for(auto *p = pixels.get(), *end = p + 4 * w * h; p != end; p += 4)
-            if(((p[0] << 16) | (p[1] << 8) | p[2]) == color_key) p[3] = 0;
-        }
-        return images.try_emplace(std::move(key), std::move(pixels), w, h).first->second.surface;
+      blit::Surface &image(const fs::path &, const std::string &name, int color_key = -1) {
+        auto resource = assets->image(name, color_key);
+        for(const auto &loaded : images) if(loaded == resource) return loaded->surface;
+        images.push_back(std::move(resource));
+        return images.back()->surface;
       }
 
       void load_map(const fs::path &root, const char *scene, Art *image_cache = nullptr) {
         const auto name = fs::u8path(scene).replace_extension(".map").generic_u8string();
-        const auto path = project_file(root, name);
+        const auto &path = assets->path(name);
         if(!fs::exists(fs::symlink_status(path))) return;
-        const auto bytes = read_file(path, name);
-        map = blit::load_tiled_map(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+        const auto bytes = assets->text(name);
+        map = blit::load_tiled_map(reinterpret_cast<const uint8_t *>(bytes->data()), bytes->size());
         if(!map) throw FileError(name, "Invalid native tilemap; expected a BTMP v1 or v2 file.");
         const auto sidecar = name + ".json";
-        const auto association = read_json(root, sidecar);
+        const auto association_resource = assets->json(sidecar);
+        const auto &association = *association_resource;
         MapSolidity overrides;
         if(const char *error = read_map_solidity(association, map->bounds.w, map->bounds.h, overrides))
           throw FileError(sidecar, error);
@@ -214,7 +161,7 @@ namespace sdk {
         if(descriptor.size() <= suffix.size() || descriptor.compare(descriptor.size() - suffix.size(), suffix.size(), suffix) != 0)
           throw FileError(sidecar, "The tileset path must name a .tileset.json descriptor.");
         TilesetDescriptor tileset;
-        if(const char *error = read_tileset_descriptor(read_json(root, descriptor), tileset)) throw FileError(descriptor, error);
+        if(const char *error = read_tileset_descriptor(*assets->json(descriptor), tileset)) throw FileError(descriptor, error);
         int key = -1;
         if(!tileset.transparent.empty()) {
           const auto &text = tileset.transparent;
@@ -269,7 +216,7 @@ namespace sdk {
           if(neighbor.scene == scene || !valid_project_relative_path(neighbor.scene) ||
              neighbor.scene.size() <= suffix.size() ||
              std::string_view(neighbor.scene).substr(neighbor.scene.size() - suffix.size()) != suffix ||
-             !fs::is_regular_file(project_file(root, neighbor.scene)))
+             !fs::is_regular_file(assets->path(neighbor.scene)))
             throw FileError(sidecar, "A connection must name a different existing .scene file.");
 
           int offset = 0;
@@ -278,7 +225,7 @@ namespace sdk {
               throw FileError(sidecar, "Connection offset_px must be an integer from -65535 to 65535.");
             offset = field->get<int>();
           }
-          neighbor.art = std::make_unique<Art>();
+          neighbor.art = std::make_unique<Art>(assets);
           neighbor.art->load_map(root, neighbor.scene.c_str(), this);
           if(!neighbor.art->map) throw FileError(sidecar, "Connected scene needs a tilemap.");
           const auto other = neighbor.art->map->pixel_size();
@@ -293,33 +240,14 @@ namespace sdk {
         }
       }
 
-      const SpriteArt &sprite(const fs::path &root, std::string_view stem) {
-        if(const auto it = sprites.find(stem); it != sprites.end()) return it->second;
-        const auto name = std::string(stem) + ".sprite.json";
-        auto &art = sprites.try_emplace(std::string(stem)).first->second;
-        if(const char *error = read_sprite_clips(read_json(root, name), art.clips)) throw FileError(name, error);
-        art.sheet = &image(root, art.clips.image);
-        const auto w = art.sheet->bounds.w, h = art.sheet->bounds.h;
-        if(w % art.clips.frame_width || h % art.clips.frame_height)
-          throw FileError(name, "Frame dimensions must divide the PNG into complete cells.");
-        const auto cells = (w / art.clips.frame_width) * (h / art.clips.frame_height);
-        for(const auto &[clip_name, clip] : art.clips.clips)
-          for(const auto &frame : clip.frames)
-            if(frame.cell >= cells) throw FileError(name, "Clip '" + clip_name + "' has a cell outside the PNG.");
-        return art;
+      const SpriteAsset &sprite(const fs::path &, std::string_view stem) {
+        if(const auto it = sprites.find(stem); it != sprites.end()) return *it->second;
+        auto resource = assets->sprite(stem);
+        return *sprites.emplace(std::string(stem), std::move(resource)).first->second;
       }
 
-      void load_sprite_preloads(const fs::path &root, std::string_view scene) {
-        const auto scene_path = project_file(root, scene);
-        try {
-          detail::visit_sprite_preloads(read_json(root, manifest), root, [&](const fs::path &path, const std::string &stem) {
-            if(path == scene_path) sprite(root, stem);
-          });
-        } catch(const FileError &) {
-          throw;
-        } catch(const std::exception &e) {
-          throw FileError(manifest, e.what());
-        }
+      void load_sprite_preloads(const std::vector<std::string> &preloads) {
+        for(const auto &stem : preloads) sprite(assets->root(), stem);
       }
 
       void load_sprites(const fs::path &root, const SceneDocument &doc) {
@@ -352,6 +280,26 @@ namespace sdk {
           if(object.prefab) prefabs.emplace(object.key, resolve(object, {}));
         for(const auto &object : doc.objects())
           if(!object.prefab) resolve(object, *object.base ? prefabs.at(object.base) : Selection{});
+      }
+
+      size_t memory_size() const {
+        size_t bytes = sizeof(*this) + images.capacity() * sizeof(images.front()) + layers.capacity() * sizeof(layers.front());
+        for(const auto &image : images) bytes += image->byte_cost;
+        for(const auto &[name, sprite] : sprites)
+          bytes += name.capacity() + sizeof(decltype(sprites)::value_type) + 64 + sprite->byte_cost + sprite->image->byte_cost;
+        if(map) {
+          bytes += sizeof(blit::Map) + map->flags.capacity() + (solid_cells.capacity() + 7) / 8;
+          bytes += map->layer_order.capacity() * sizeof(std::string);
+          for(const auto &name : map->layer_order) bytes += name.capacity() + 1;
+          for(const auto &[name, layer] : map->layers)
+            bytes += sizeof(blit::MapLayer) + 96 + name.capacity() + 1 + layer.name.capacity() + 1 +
+                     layer.tiles.capacity() + layer.transforms.capacity();
+        }
+        bytes += tile_animations.capacity() * sizeof(TileAnimation);
+        for(const auto &clip : tile_animations) bytes += sizeof(clip) + clip.name.capacity() + clip.frames.capacity() * sizeof(clip.frames.front());
+        for(const auto &[name, property] : tile_properties) bytes += sizeof(property) + 96 + name.capacity();
+        for(const auto &neighbor : neighbors) if(neighbor.art) bytes += neighbor.scene.capacity() + neighbor.art->memory_size();
+        return bytes;
       }
     };
 
@@ -499,8 +447,19 @@ namespace sdk {
     std::vector<uint32_t> placed_generation; // distinguish placed entities from runtime additions
     std::vector<DrawItem> draw_items;
     fs::path root;
-    std::deque<std::string> sources; // SceneReader borrows each source until finish().
-    std::unique_ptr<Art> active, staged;
+    std::shared_ptr<ProjectAssets> assets;
+    std::shared_ptr<const Json> manifest_data;
+    std::map<fs::path, std::vector<std::string>> preloads;
+    std::vector<std::shared_ptr<const std::string>> sources;
+    std::shared_ptr<Art> active, staged, cached_art;
+    struct CachedScene {
+      std::unique_ptr<SceneDocument> catalogue;
+      std::shared_ptr<Art> art;
+      size_t bytes;
+    };
+    std::list<CachedScene> cache, pending_cache;
+    size_t cache_budget = 0, cache_bytes = 0;
+    bool preloading = false, opening = false;
     void (*on_loaded)() = nullptr;
     const Travel *pending_travel = nullptr; // Scoped to a travel load; cleared by finish().
     SceneError diagnostic{};
@@ -510,10 +469,56 @@ namespace sdk {
       cameras(world, world.capacity()),
       scenes(world, limits_for(world.capacity()), {this, read, finish, prepare}), placed_generation(world.capacity()) {}
 
+    void reset_resources() {
+      assets = std::make_shared<ProjectAssets>(root);
+      manifest_data = assets->json(manifest);
+      preloads.clear();
+      detail::visit_sprite_preloads(*manifest_data, root, [&](const fs::path &scene, const std::string &stem) {
+        preloads[scene].push_back(stem);
+      });
+      cache.clear();
+      cache_bytes = 0;
+    }
+
+    std::shared_ptr<Art> prepare_art(const SceneDocument &doc) {
+      auto art = std::make_shared<Art>(assets);
+      const auto *scene = doc.sources().front().path;
+      art->load_map(root, scene);
+      art->load_sprites(root, doc);
+      if(const auto found = preloads.find(assets->path(scene)); found != preloads.end())
+        art->load_sprite_preloads(found->second);
+      return art;
+    }
+
+    void retain_pending() noexcept {
+      if(pending_cache.empty()) return;
+      const auto bytes = pending_cache.front().bytes;
+      if(bytes > cache_budget) { pending_cache.clear(); return; }
+      while(cache_bytes > cache_budget - bytes && !cache.empty()) {
+        cache_bytes -= cache.back().bytes;
+        cache.pop_back();
+      }
+      cache_bytes += bytes;
+      cache.splice(cache.begin(), pending_cache);
+    }
+
+    bool load_cached(std::string_view scene, SceneError &error) {
+      for(auto it = cache.begin(); it != cache.end(); ++it) {
+        if(scene != it->catalogue->sources().front().path) continue;
+        cache.splice(cache.begin(), cache, it);
+        cached_art = cache.front().art;
+        return scenes.load(*cache.front().catalogue, error);
+      }
+      return scenes.load(scene, error);
+    }
+
     static bool read(void *context, std::string_view path, std::string_view &text) {
       auto &p = *static_cast<Player *>(context);
       try {
-        text = p.sources.emplace_back(read_file(project_file(p.root, path), path, 1024 * 1024));
+        if(p.sources.empty() && p.active && !p.pending_travel && !p.preloading && !p.opening)
+          p.reset_resources(); // Explicit bridge reload sees edits; normal travel reuses resources.
+        p.sources.push_back(p.assets->text(path, 1024 * 1024));
+        text = *p.sources.back();
         return true;
       } catch(const std::exception &e) {
         detail::scene_error(p.diagnostic, path, 0, e.what());
@@ -526,13 +531,17 @@ namespace sdk {
       auto &p = *static_cast<Player *>(context);
       if(p.pending_travel && !p.pending_travel->prepare(doc, error)) return false;
       try {
-        p.staged = std::make_unique<Art>();
-        p.staged->load_map(p.root, doc.sources().front().path);
-        p.staged->load_sprites(p.root, doc);
-        p.staged->load_sprite_preloads(p.root, doc.sources().front().path);
+        p.staged = p.cached_art ? p.cached_art : p.prepare_art(doc);
+        if(!p.cached_art && p.cache_budget) {
+          auto catalogue = doc.compact_copy();
+          const auto bytes = catalogue->memory_size() + p.staged->memory_size() + sizeof(CachedScene) + 64;
+          p.pending_cache.push_back({std::move(catalogue), p.staged, bytes});
+        }
         // Size the queue before committing artwork so rendering never grows it.
-        p.draw_items.reserve(p.sprites.capacity() + p.staged->layers.size());
+        if(!p.preloading) p.draw_items.reserve(p.sprites.capacity() + p.staged->layers.size());
         return true;
+      } catch(const ProjectAssetError &e) {
+        detail::scene_error(error, e.path, 0, e.what());
       } catch(const FileError &e) {
         detail::scene_error(error, e.path, e.line, e.what());
       } catch(const std::exception &e) {
@@ -547,8 +556,12 @@ namespace sdk {
       const auto *travel = p.pending_travel;
       p.pending_travel = nullptr;
       p.sources.clear();
-      if(success) p.active.swap(p.staged);
+      if(success) {
+        p.active.swap(p.staged);
+        p.retain_pending();
+      } else p.pending_cache.clear();
       p.staged.reset();
+      p.cached_art.reset();
       if(success && travel) travel->apply(p.scenes.world());
       if(success && p.on_loaded) p.on_loaded();
     }
@@ -566,24 +579,39 @@ namespace sdk {
     }
     auto &p = *player_;
     auto old_root = std::move(p.root);
+    auto old_assets = p.assets;
+    auto old_manifest = p.manifest_data;
+    auto old_preloads = std::move(p.preloads);
+    auto old_cache = std::move(p.cache);
+    const auto old_bytes = p.cache_bytes;
+    p.cache_budget = scene_cache_budget_;
+    p.opening = true;
     const auto old_callback = p.on_loaded;
     p.on_loaded = on_loaded;
     p.diagnostic = {};
     try {
       p.root = project_root();
-      const auto config = read_json(p.root, manifest);
-      const auto &scene = path_field(config, "scene", manifest);
+      p.reset_resources();
+      const auto &scene = path_field(*p.manifest_data, "scene", manifest);
       SceneError error;
-      if(p.scenes.load(scene, error)) return true;
+      const bool success = p.scenes.load(scene, error);
+      p.opening = false;
+      if(success) return true;
       if(!*p.diagnostic.message) p.diagnostic = error;
     } catch(const FileError &e) {
       detail::scene_error(p.diagnostic, e.path, e.line, e.what());
     } catch(const std::exception &e) {
       detail::scene_error(p.diagnostic, manifest, 0, e.what());
     }
+    p.opening = false;
     if(p.active) {
       p.root = std::move(old_root);
       p.on_loaded = old_callback;
+      p.assets = std::move(old_assets);
+      p.manifest_data = std::move(old_manifest);
+      p.preloads = std::move(old_preloads);
+      p.cache = std::move(old_cache);
+      p.cache_bytes = old_bytes;
     }
     std::fprintf(stderr, "%s:%u: %s\n", p.diagnostic.file, p.diagnostic.line, p.diagnostic.message);
     return false;
@@ -592,7 +620,7 @@ namespace sdk {
   std::string GameScene::project_asset_path(std::string_view project_relative) const {
     if(!player_ || !player_->active) return {};
     try {
-      return project_file(player_->root, project_relative).u8string();
+      return player_->active->assets->path(project_relative).u8string();
     } catch(const std::exception &e) {
       std::fputs("GameScene::project_asset_path: ", stderr);
       if(!project_relative.empty()) {
@@ -602,6 +630,51 @@ namespace sdk {
       std::fprintf(stderr, "%s\n", e.what());
       return {};
     }
+  }
+
+  std::shared_ptr<ProjectAssets> GameScene::project_assets() const {
+    return player_ && player_->active ? player_->active->assets : nullptr;
+  }
+
+  void GameScene::set_scene_cache_budget(size_t bytes) {
+    scene_cache_budget_ = bytes;
+    if(!player_) return;
+    player_->cache.clear();
+    player_->cache_bytes = 0;
+    player_->cache_budget = bytes;
+  }
+
+  size_t GameScene::cached_scene_bytes() const { return player_ ? player_->cache_bytes : 0; }
+
+  bool GameScene::preload_scene(std::string_view scene) {
+    if(!player_ || !player_->active || player_->pending_travel || player_->preloading || !scene_cache_budget_) return false;
+    auto &p = *player_;
+    for(auto it = p.cache.begin(); it != p.cache.end(); ++it) {
+      if(scene != it->catalogue->sources().front().path) continue;
+      p.cache.splice(p.cache.begin(), p.cache, it);
+      return true;
+    }
+    p.preloading = true;
+    bool success = false;
+    SceneError error;
+    try {
+      SceneDocument catalogue(limits_for(world.capacity()));
+      if(read_scene_file(catalogue, scene, {&p, Player::read, nullptr, nullptr}, error) &&
+         !catalogue.snapshot() && Player::prepare(&p, catalogue, error)) {
+        success = !p.pending_cache.empty() && p.pending_cache.front().bytes <= p.cache_budget;
+        if(success) p.retain_pending();
+        else detail::scene_error(error, scene, 0, "scene resources exceed the configured cache budget");
+      }
+    } catch(const std::exception &e) {
+      detail::scene_error(error, scene, 0, e.what());
+    }
+    p.sources.clear();
+    p.staged.reset();
+    p.pending_cache.clear();
+    p.preloading = false;
+    if(!success && !*error.message) detail::scene_error(error, scene, 0, "expected an authored scene for preloading");
+    if(!success) report_travel_error(error);
+    return success;
   }
 
   bool GameScene::travel(std::string_view scene, std::string_view actor, std::string_view arrival) {
@@ -626,7 +699,7 @@ namespace sdk {
 
     p.diagnostic = {};
     p.pending_travel = &request;
-    if(p.scenes.load({path, scene.size()}, error)) return true;
+    if(p.load_cached({path, scene.size()}, error)) return true;
     return report_travel_error(*p.diagnostic.message ? p.diagnostic : error);
   }
 
@@ -679,11 +752,12 @@ namespace sdk {
     const auto *neighbor = crossing_at(*p.active, world_point, collider(request.actor), point);
     if(!neighbor) return false;
     request.position = point;
-    const auto scene = neighbor->scene; // connection storage is replaced on success
+    char scene[scene_path_size];
+    if(!detail::scene_copy(scene, sizeof(scene), neighbor->scene)) return false;
     SceneError error;
     p.diagnostic = {};
     p.pending_travel = &request;
-    if(p.scenes.load(scene, error)) return true;
+    if(p.load_cached(scene, error)) return true;
     return report_travel_error(*p.diagnostic.message ? p.diagnostic : error);
   }
 
@@ -875,7 +949,7 @@ namespace sdk {
         const auto found = art.sprites.find(sprite.asset);
         if(found != art.sprites.end()) {
           const auto &position = *p.transforms.get(item.sprite);
-          draw_sprite(screen, *found->second.sheet, found->second.clips, position, sprite, world_origin, time, sprite.flip_x);
+          draw_sprite(screen, found->second->image->surface, found->second->clips, position, sprite, world_origin, time, sprite.flip_x);
         }
       }
     }

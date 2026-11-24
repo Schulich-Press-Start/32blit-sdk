@@ -2,8 +2,6 @@
 
 #include "../world/sprite_clips.hpp"
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <numeric>
 #include <stdexcept>
 #include <string_view>
@@ -13,7 +11,7 @@ namespace sdk::detail {
   inline constexpr int vfx_position_limit = 32768;
   inline constexpr unsigned vfx_cell_limit = 2048u * 2048u - 1;
   inline constexpr unsigned vfx_layer_limit = 64, vfx_cue_limit = 256;
-  inline constexpr int vfx_text_limit = 256 * 1024, vfx_image_limit = 16 * 1024 * 1024;
+  inline constexpr int vfx_text_limit = 256 * 1024;
 
   struct VfxLayer {
     std::string sprite, clip;
@@ -49,17 +47,6 @@ namespace sdk::detail {
       if(slash == path.npos) return true;
       path.remove_prefix(slash + 1);
     }
-  }
-
-  template<class Buffer>
-  Buffer read_vfx_file(const std::filesystem::path &path, int limit) {
-    std::ifstream input(path, std::ios::binary | std::ios::ate);
-    const auto size = input.tellg();
-    if(size <= 0 || size > limit) throw std::runtime_error("File is empty, unreadable, or too large.");
-    Buffer bytes(static_cast<size_t>(size), 0);
-    if(!input.seekg(0).read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size)))
-      throw std::runtime_error("Cannot read file.");
-    return bytes;
   }
 
   inline VfxDescriptor read_vfx_descriptor(const nlohmann::json &json) {

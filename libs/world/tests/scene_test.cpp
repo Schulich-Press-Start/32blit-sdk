@@ -82,6 +82,42 @@ TEST(Scene, AuthoredEditsPreserveStableReferencesAndIncludeOwnership) {
   EXPECT_FLOAT_EQ(transform->rotation, 5);
 }
 
+TEST(Scene, CachedCatalogueRemapsReferencesAndPreservesLargerLoadBudgets) {
+  const sdk::SceneLimits limits{8, 16, 32, 2};
+  const File inputs[] = {
+    {"large.scene", "scene 1 Large\nentity a\n Transform2D x=1\nentity b\n Transform2D x=2\nentity c\n Transform2D x=3\n"},
+    {"bad.scene", "scene 1 Bad\nentity missing_pool\n Caption text=hello\n"}
+  };
+  Files files{inputs, 2};
+  sdk::SceneDocument original(limits);
+  sdk::SceneError error;
+  ASSERT_TRUE(sdk::read_scene(original, "scene 1 Small\nentity hero\n Transform2D x=42\nentity follower\n Link target=@hero\n",
+                              "small.scene", {}, error));
+  auto cached = original.compact_copy();
+  sdk::World world(8);
+  sdk::ComponentPool<sdk::Name> names(world, 8);
+  sdk::ComponentPool<sdk::Transform2D> transforms(world, 8);
+  sdk::ComponentPool<Link> links(world, 8);
+  sdk::SceneRuntime runtime(world, limits, {&files, read_file});
+  ASSERT_TRUE(runtime.load(*cached, error)) << error.message;
+  const auto old_hero = world.find("hero");
+  ASSERT_TRUE(runtime.load(*cached, error)) << error.message;
+  EXPECT_FALSE(world.alive(old_hero));
+  const auto hero = world.find("hero");
+  const auto target = world.get<Link>(world.find("follower"))->target;
+  EXPECT_TRUE(world.alive(target));
+  EXPECT_EQ(target.index(), hero.index());
+  EXPECT_EQ(target.generation(), hero.generation());
+  EXPECT_FLOAT_EQ(world.get<sdk::Transform2D>(hero)->x, 42);
+  EXPECT_FALSE(runtime.load("bad.scene", error));
+  EXPECT_TRUE(world.alive(hero));
+  EXPECT_EQ(world.get<Link>(world.find("follower"))->target.index(), hero.index());
+  EXPECT_EQ(world.get<Link>(world.find("follower"))->target.generation(), hero.generation());
+  ASSERT_TRUE(runtime.load("large.scene", error)) << error.message;
+  EXPECT_FLOAT_EQ(world.get<sdk::Transform2D>(world.find("c"))->x, 3);
+  EXPECT_EQ(world.size(), 3);
+}
+
 TEST(Scene, LongPathEditsAndSnapshotsRoundTrip) {
   const std::string longest = "assets/folder with space/" + std::string(sdk::path_field_size - 26, 'a');
   ASSERT_EQ(longest.size(), sdk::path_field_size - 1);

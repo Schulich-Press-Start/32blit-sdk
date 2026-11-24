@@ -97,6 +97,24 @@ void render(uint32_t time) {
 - `game.sweep(box, delta, mask, ignore)` returns `None`, `Entity`, or `Tile`, a hit fraction of the requested travel in `[0, 1]`, and an entry normal. It checks solid tiles separately from the entity mask; pass `false` for `solid_tiles` to exclude them. Tiles win exact ties, map edges do not block, and an initial overlap returns fraction `0` with a zero normal. Neither movement nor damage happens automatically. Targets are sampled at their current positions, not swept along their own paths.
 - `game.travel("scenes/shed.scene", "player", "from_garden")` explicitly loads the destination and sets the destination player’s `x` and `y` from the named arrival. Both names must resolve to destination entities with `Transform2D`. A failed travel keeps the current world and artwork; successful travel replaces entity handles and calls the scene-loaded callback after positioning the actor. Call it outside world queries. Colliders and game-defined components never initiate travel on their own.
 
+### Preparing fast scene transitions
+
+`GameScene` retains recently loaded, validated scene catalogues and resources within a configurable byte budget. Cached travel re-instantiates entities without reading files, parsing scene text, or decoding PNGs. `preload_scene(path)` does the cold work before a door or seam is reached and does not create entities or call the scene-loaded callback. Check its result. Garden Walk preloads its three areas during startup.
+
+```cpp
+game.set_scene_cache_budget(256 * 1024);
+if (!game.open(on_loaded)) return;
+if (!game.preload_scene("scenes/shed.scene")) {
+  // Report the failed preload before starting gameplay.
+}
+```
+
+The default optional-retention budget is 2 MiB, not a preallocated 2 MiB buffer. `cached_scene_bytes()` reports a conservative retained-resource estimate, including compact catalogues, maps, and referenced image buffers. Shared images can be counted more than once, so retention stays below the estimate. The active scene, externally held VFX resources, and load-time scratch space still require memory outside this optional budget. Reducing the budget clears retained scenes; zero disables retention. Least recently used scenes are evicted when new cached resources would exceed the budget. Choose a budget and preload working set that fit the target hardware instead of loading every area of a large game.
+
+Assets are immutable within a project generation. Normal travel uses the prepared versions. Call `open()` again, or use an explicit Debug bridge `load_scene`, to reload edited data. A failed load keeps the active world and its artwork. Loaded VFX retain their prior generation until reloaded explicitly. `ProjectAssets` in `project_assets.hpp` shares descriptors, text, and decoded images between scenes and effects; it does not keep unused pixel buffers alive. Its `stats()` counters report actual file reads and JSON/PNG decode attempts. Path metadata is bounded separately to 256 entries.
+
+Cold scene loads remain synchronous. To avoid a hitch during play, prepare the required areas before play or during an explicit loading screen. This is not asynchronous streaming.
+
 ## Named input actions on desktop SDL
 
 Include `input_actions.hpp`. Keep a `sdk::InputActions` map on the game thread, get a handle with `action("jump")` during setup, and call `update()` once at the start of each game update. Query `down(handle)` for held input or `pressed(handle)` / `released(handle)` for transitions. If an action has several bindings, it remains held until all of them are released. This doesn't change `blit::buttons`.
@@ -179,6 +197,8 @@ Each `.vfx.json` defines one named, one-shot effect. Save this example as `asset
 - `audio` is a project-relative `.audio.json` path; it is required only when `cues` has entries. Each of up to 256 timeline entries binds a `cue` ID to `at_ms` (0 through `duration_ms`, inclusive). Entries fire in time order, breaking ties by authored order. The native SDL player uses the existing single cue channel, so a new cue replaces the one still sounding.
 
 Keep a `sdk::Vfx` from `vfx.hpp` as game state. Call `effect.load("assets/fountain-pop.vfx.json", game)` after `GameScene::open()` and check the return value and `last_error()`. Loading preloads and validates the referenced art and audio; a failed replacement leaves the previous effect loaded. Builds without native SDL cue output can load sprite-only effects.
+
+VFX preparation uses `GameScene::project_assets()` to share sprite descriptors and decoded images with the scene. A loaded effect retains shared sprite handles and its project-generation service, so it can keep drawing after scene travel or another project is opened; it does not automatically adopt edited art or the new project's assets. Replacing or destroying the effect releases those handles. Animation lookup caches remain per effect. Audio descriptor text is shared during preparation, while WAV buffers remain owned by each audio player and use the existing SDL cue channel.
 
 Call `effect.start(time, {world_x, world_y})` on a gameplay event and `effect.update(time)` on every update, using the engine's monotonic millisecond timestamp. Start fires zero-offset cues; subsequent updates fire each crossed cue once even if a frame was skipped. Call `effect.draw(blit::screen, camera_origin)` after drawing the scene with that same camera origin. Drawing and updating do not load files. Restart starts a new run at zero; `stop()` stops drawing and cancels pending cues without cutting off a cue that has already fired.
 

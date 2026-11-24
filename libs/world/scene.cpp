@@ -518,6 +518,27 @@ namespace sdk {
     type_count_ = source.type_count_;
   }
 
+  std::unique_ptr<SceneDocument> SceneDocument::compact_copy() const {
+    SceneLimits limits{static_cast<uint32_t>(objects_.size()), static_cast<uint32_t>(components_.size()),
+                       static_cast<uint32_t>(fields_.size()), static_cast<uint32_t>(sources_.size())};
+    auto copy = std::make_unique<SceneDocument>(limits);
+    copy->sources_ = sources_;
+    copy->objects_ = objects_;
+    copy->components_ = components_;
+    copy->fields_ = fields_;
+    std::memcpy(copy->title_, title_, sizeof(title_));
+    std::memcpy(copy->snapshot_source_, snapshot_source_, sizeof(snapshot_source_));
+    copy->snapshot_ = snapshot_;
+    copy->types_ = types_;
+    copy->type_count_ = type_count_;
+    return copy;
+  }
+
+  size_t SceneDocument::memory_size() const {
+    return sizeof(*this) + sources_.capacity() * sizeof(SceneSource) + objects_.capacity() * sizeof(SceneObject) +
+           components_.capacity() * sizeof(SceneComponent) + fields_.capacity() * sizeof(SceneField);
+  }
+
   bool SceneDocument::duplicate_entity(uint32_t index, std::string_view key, SceneError &error) {
     const auto *source = editable_object(index, error);
     if(!source) return false;
