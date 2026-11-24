@@ -1,8 +1,34 @@
 #include "SDL.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <utility>
+
 #include "Input.hpp"
 #include "engine/input.hpp"
 #include "System.hpp"
+
+namespace {
+  class ControllerLock {
+  public:
+    explicit ControllerLock(SDL_mutex *mutex) : mutex(mutex) {
+      if (SDL_LockMutex(mutex) != 0) {
+        SDL_LogCritical(SDL_LOG_CATEGORY_INPUT, "Could not lock controller mutex: %s", SDL_GetError());
+        std::abort();
+      }
+    }
+
+    ~ControllerLock() {
+      SDL_UnlockMutex(mutex);
+    }
+
+    ControllerLock(const ControllerLock &) = delete;
+    ControllerLock &operator=(const ControllerLock &) = delete;
+
+  private:
+    SDL_mutex *mutex;
+  };
+}
 
 std::map<int, int> Input::keys = {
 	// arrow keys
@@ -67,32 +93,34 @@ int Input::find_button(int button) {
 	else return iter->second;
 }
 
-Input::Input(System *target) : target(target) {
-  // Open all joysticks as game controllers
-  for(int n = 0; n < SDL_NumJoysticks(); n++) {
-
-    if(SDL_IsGameController(n)) {
-
-      auto gc = SDL_GameControllerOpen(n);
-      if(gc != nullptr) {
-        _add_controller(gc);
-      }
+Input::Input(System *target) : target(target), controllers_mutex(SDL_CreateMutex()) {
+  if (!controllers_mutex) {
+    SDL_LogCritical(SDL_LOG_CATEGORY_INPUT, "Could not create controller mutex: %s", SDL_GetError());
+    std::abort();
+  }
+  // Open all joysticks as game controllers.
+  const int count = SDL_NumJoysticks();
+  for (int n = 0; n < count; ++n) {
+    if (SDL_IsGameController(n)) {
+      handle_controller_added(n);
     }
   }
 }
 
-Input::~Input() {
-  for (auto gc : game_controllers)
-  {
-    _remove_controller(gc.gc_id);
-  }
-  game_controllers.clear();
-}
+// System::stop() joins the game thread before Input is destroyed. Controller
+// handles close before the mutex; no access to the already-deleted System is needed.
+Input::~Input() = default;
 
 bool Input::handle_mouse(int button, bool state, int x, int y) {
 
+#ifdef __EMSCRIPTEN__
   int half_w = target->mode() ? target->width / 2 : target->width / 4;
   int half_h = target->mode() ? target->height / 2 : target->height / 4;
+#else
+  // SDL delivers mouse events in the renderer's logical panel coordinates.
+  int half_w = target->width / 2;
+  int half_h = target->height / 2;
+#endif
 
 	if (button == SDL_BUTTON_LEFT) {
 		if (state) {
@@ -111,23 +139,36 @@ bool Input::handle_mouse(int button, bool state, int x, int y) {
 	return false;
 }
 
-bool Input::handle_keyboard(int key, bool state) {
-	if (int blit_button = find_key(key)) {
-		target->set_button(blit_button, state);
+bool Input::handle_keyboard(const SDL_Keysym &key, bool state) {
+	const int blit_button = find_key(key.sym);
+	target->set_keyboard_button(key.scancode, blit_button, state);
+	if (blit_button) {
 		return true;
-	} else if (key == SDLK_LCTRL) {
+	} else if (key.sym == SDLK_LCTRL) {
 		left_ctrl = state;
 		return true;
 	}
 	return false;
 }
 
-bool Input::handle_controller_button(int button, bool state) {
-	if (int blit_button = find_button(button)) {
-		target->set_button(blit_button, state);
-		return true;
-	}
-	return false;
+void Input::handle_controller_button(SDL_JoystickID instance_id, int button, bool state) {
+  static_assert(SDL_CONTROLLER_BUTTON_MAX <= 32, "Action input pad mask must hold all SDL controller buttons");
+  const int blit_button = find_button(button);
+
+  ControllerLock lock(controllers_mutex.get());
+  const auto controller = find_controller(instance_id);
+  if (controller != game_controllers.end() && button >= 0 && button < SDL_CONTROLLER_BUTTON_MAX) {
+    const uint32_t bit = uint32_t{1} << button;
+    if (state) {
+      controller->held_buttons |= bit;
+    } else {
+      controller->held_buttons &= ~bit;
+    }
+  } else if (!blit_button) {
+    return;
+  }
+
+  target->set_controller_buttons(held_controller_buttons(), blit_button, state);
 }
 
 bool Input::handle_controller_motion(int axis, int value) {
@@ -158,29 +199,53 @@ bool Input::handle_controller_accel(float data[3]) {
   return true;
 }
 
-void Input::handle_controller_added(Sint32 joystick_index) {
-
-  SDL_GameController* gc = SDL_GameControllerOpen(joystick_index);
-  if (gc != nullptr) {
-    _add_controller(gc);
-  }
+void Input::handle_focus_lost() {
+  left_ctrl = false;
+  target->clear_action_keys();
 }
 
-void Input::handle_controller_removed(Sint32 joystick_index) {
-
-  auto gc_removed = SDL_GameControllerFromInstanceID(joystick_index);
-  if(gc_removed != nullptr) {
-    _remove_controller(gc_removed);
+void Input::handle_controller_added(int joystick_index) {
+  ControllerLock lock(controllers_mutex.get());
+  ControllerHandle handle(SDL_GameControllerOpen(joystick_index));
+  if (!handle) {
+    return;
   }
+
+  const auto instance_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(handle.get()));
+  if (instance_id < 0 || find_controller(instance_id) != game_controllers.end()) {
+    // SDL can also enqueue an add event for a controller opened at startup.
+    return;
+  }
+
+  // Welcome rumble to test if it can rumble.
+  const bool can_rumble = SDL_GameControllerRumble(handle.get(), 0xFFFF, 0xFFFF, 200) == 0;
+
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+  // Enable accelerometer if present.
+  SDL_GameControllerSetSensorEnabled(handle.get(), SDL_SENSOR_ACCEL, SDL_TRUE);
+#endif
+
+  game_controllers.push_back({std::move(handle), instance_id, can_rumble});
+}
+
+void Input::handle_controller_removed(SDL_JoystickID instance_id) {
+  ControllerLock lock(controllers_mutex.get());
+  const auto controller = find_controller(instance_id);
+  if (controller == game_controllers.end()) {
+    return;
+  }
+
+  game_controllers.erase(controller);
+  target->set_controller_buttons(held_controller_buttons());
 }
 
 void Input::rumble_controllers(const float& volume) {
-
-  if(volume > 0) {
-    for (auto gc : game_controllers) {
-      if(gc.can_rumble) {
-        auto frequency = volume * 0xFFFF;
-        SDL_GameControllerRumble(gc.gc_id, frequency, frequency, 50);
+  if (volume > 0) {
+    const auto frequency = volume * 0xFFFF;
+    ControllerLock lock(controllers_mutex.get());
+    for (const auto &controller : game_controllers) {
+      if (controller.can_rumble) {
+        SDL_GameControllerRumble(controller.handle.get(), frequency, frequency, 50);
       }
     }
   }
@@ -204,25 +269,16 @@ void Input::_virtual_analog(int x, int y, int half_w, int half_h) {
 	target->set_joystick(1, jy);
 }
 
-void Input::_add_controller(SDL_GameController* gc) {
-  // welcome rumble to test if it can rumble
-  auto can_rumble = SDL_GameControllerRumble(gc, 0xFFFF, 0xFFFF, 200);
-
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-  // enable accelerometer if present
-  SDL_GameControllerSetSensorEnabled(gc, SDL_SENSOR_ACCEL, SDL_TRUE);
-#endif
-
-  GameController gcs = {gc, can_rumble == 0};
-  game_controllers.push_back(gcs);
+std::vector<Input::GameController>::iterator Input::find_controller(SDL_JoystickID instance_id) {
+  return std::find_if(game_controllers.begin(), game_controllers.end(), [instance_id](const GameController &controller) {
+    return controller.instance_id == instance_id;
+  });
 }
 
-void Input::_remove_controller(SDL_GameController* gc) {
-  game_controllers.erase(
-    std::remove_if(game_controllers.begin(), game_controllers.end(), [&](GameController const & controller) {
-        return controller.gc_id == gc;
-    }),
-    game_controllers.end());
-
-  SDL_GameControllerClose(gc);
+uint32_t Input::held_controller_buttons() const {
+  uint32_t held = 0;
+  for (const auto &controller : game_controllers) {
+    held |= controller.held_buttons;
+  }
+  return held;
 }

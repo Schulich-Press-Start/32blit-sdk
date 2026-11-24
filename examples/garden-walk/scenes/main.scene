@@ -1,0 +1,18 @@
+scene 1 GardenWalk
+entity player
+  Transform2D x=152 y=120
+  Sprite asset=assets/gardener clip=idle offset_x=-6 offset_y=-7
+  BoxCollider2D offset_x=-5 offset_y=-5 width=10 height=10
+entity fountain
+  Transform2D x=376 y=200
+  Sprite asset=assets/fountain clip=flow offset_x=-8 offset_y=-8
+entity shed_door
+  Transform2D x=144 y=208
+  Sprite asset=assets/door offset_x=-12 offset_y=-12
+  BoxCollider2D offset_x=-12 offset_y=-9 width=24 height=18 category=1
+  Door scene=scenes/shed.scene arrival=from_garden
+entity from_shed
+  Transform2D x=152 y=184
+entity camera
+  Transform2D x=152 y=120
+  Camera2D follow=@player

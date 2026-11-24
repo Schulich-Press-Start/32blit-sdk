@@ -1,0 +1,13 @@
+scene 1 Meadow
+entity player
+  Transform2D x=8 y=88
+  Sprite asset=assets/gardener clip=idle offset_x=-6 offset_y=-7
+  BoxCollider2D offset_x=-5 offset_y=-5 width=10 height=10
+entity from_main
+  Transform2D x=8 y=88
+entity guide
+  Transform2D x=184 y=88
+  Sprite asset=assets/gardener clip=idle offset_x=-6 offset_y=-7 flip_x=true
+entity camera
+  Transform2D x=8 y=88
+  Camera2D follow=@player

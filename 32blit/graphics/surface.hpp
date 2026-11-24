@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <string>
 
-#ifdef WIN32
+#ifdef _MSC_VER
 #define __attribute__(A)
 #endif
 

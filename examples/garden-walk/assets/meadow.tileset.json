@@ -1,0 +1,18 @@
+{
+  "image": "assets/garden.png",
+  "tile_size": 16,
+  "properties": ["solid"],
+  "tiles": {
+    "3": {"solid": true},
+    "4": {"solid": true},
+    "9": {"solid": true}
+  },
+  "animations": [
+    {"name": "creek", "cell": 4, "frames": [
+      {"cell": 4, "duration_ms": 180},
+      {"cell": 6, "duration_ms": 140},
+      {"cell": 7, "duration_ms": 180},
+      {"cell": 8, "duration_ms": 140}
+    ]}
+  ]
+}

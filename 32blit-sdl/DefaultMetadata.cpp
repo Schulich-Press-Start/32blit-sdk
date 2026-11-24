@@ -1,6 +1,6 @@
 // Default metadata if there is non compiled into the game
 // There should be nothing else in this file so that the VS linker drops it when not needed
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(BLIT_STRONG_DEFAULT_METADATA)
 #define WEAK
 #else
 #define WEAK [[gnu::weak]]

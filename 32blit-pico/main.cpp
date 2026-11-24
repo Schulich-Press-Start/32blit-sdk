@@ -190,6 +190,8 @@ static const blit::APIConst blit_api_const {
 
   ::get_screen_data,
   ::set_framebuffer,
+
+  nullptr, // get_wall_clock
 };
 
 [[gnu::section(".bss.api_data")]]

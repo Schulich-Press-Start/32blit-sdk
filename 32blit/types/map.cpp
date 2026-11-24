@@ -1,9 +1,181 @@
 /*! \file mat.cpp
 */
 #include <algorithm>
+#include <cstring>
+#include <limits>
+#include <utility>
 #include "map.hpp"
 
 namespace blit {
+  namespace {
+    constexpr uint16_t legacy_version = 1, current_version = 2;
+
+    uint16_t read_le16(const uint8_t *data) {
+      return uint16_t(data[0]) | (uint16_t(data[1]) << 8);
+    }
+
+    int32_t read_signed_le32(const uint8_t *data) {
+      const uint32_t bits = uint32_t(data[0]) | (uint32_t(data[1]) << 8) |
+                            (uint32_t(data[2]) << 16) | (uint32_t(data[3]) << 24);
+      // Keep both unsigned-to-signed casts within range (including INT32_MIN).
+      return bits <= INT32_MAX ? static_cast<int32_t>(bits) : -1 - static_cast<int32_t>(UINT32_MAX - bits);
+    }
+
+    bool valid_utf8(const uint8_t *data, std::size_t size) {
+      while (size != 0) {
+        const uint8_t first = *data++;
+        --size;
+        if (first < 0x80)
+          continue;
+        if (first < 0xc2 || first > 0xf4)
+          return false;
+
+        const std::size_t count = first < 0xe0 ? 1 : first < 0xf0 ? 2 : 3;
+        if (size < count)
+          return false;
+        // Exclude overlong sequences, surrogates, and values above U+10FFFF.
+        if ((first == 0xe0 && data[0] < 0xa0) ||
+            (first == 0xed && data[0] >= 0xa0) ||
+            (first == 0xf0 && data[0] < 0x90) ||
+            (first == 0xf4 && data[0] >= 0x90))
+          return false;
+        for (std::size_t i = 0; i < count; ++i) {
+          if ((data[i] & 0xc0) != 0x80)
+            return false;
+        }
+        data += count;
+        size -= count;
+      }
+      return true;
+    }
+  }
+
+  std::unique_ptr<Map> load_tiled_map(const uint8_t *data, std::size_t size) {
+    constexpr std::size_t header_size = 12;
+    if (!data || size < header_size || std::memcmp(data, "BTMP", 4) != 0)
+      return nullptr;
+    const auto version = read_le16(data + 4);
+    if (version != legacy_version && version != current_version)
+      return nullptr;
+    const std::size_t order_size = version == current_version ? 4 : 0;
+
+    const uint16_t width = read_le16(data + 6);
+    const uint16_t height = read_le16(data + 8);
+    const uint16_t layer_count = read_le16(data + 10);
+    // Map multiplies the dimensions and computes tile indices in signed arithmetic.
+    if (!width || !height || !layer_count ||
+        width > std::numeric_limits<int32_t>::max() / height)
+      return nullptr;
+
+    const uint32_t area = uint32_t(width) * height;
+    data += header_size;
+    size -= header_size;
+    // Each layer needs a nonempty length-prefixed name, optional order, and both planes.
+    const std::size_t layer_budget = size / layer_count;
+    const std::size_t minimum_metadata = 2 + order_size;
+    if (layer_budget < minimum_metadata || area > (layer_budget - minimum_metadata) / 2)
+      return nullptr;
+
+    const std::size_t cells = area;
+    auto map = std::make_unique<Map>(Rect(0, 0, width, height));
+    map->layer_order.reserve(layer_count);
+    for (uint16_t i = 0; i < layer_count; ++i) {
+      if (size < 1 + order_size)
+        return nullptr;
+      const uint8_t name_size = *data++;
+      const std::size_t available = size - 1 - order_size;
+      if (!name_size || name_size > available || (available - name_size) / 2 < cells ||
+          std::memchr(data, 0, name_size) || !valid_utf8(data, name_size))
+        return nullptr;
+
+      std::string name(reinterpret_cast<const char *>(data), name_size);
+      data += name_size;
+      const int32_t order = order_size ? read_signed_le32(data) : int32_t(layer_count - i);
+      data += order_size;
+      const uint8_t *transforms = data + cells;
+      const uint8_t *end = transforms + cells;
+      if (std::any_of(transforms, end, [](uint8_t value) { return value > 7; }))
+        return nullptr;
+
+      auto [it, inserted] = map->layers.try_emplace(name);
+      if (!inserted)
+        return nullptr;
+      auto &layer = it->second;
+      layer.map = map.get();
+      layer.name = name;
+      layer.layer = order;
+      layer.tiles.assign(data, transforms);
+      layer.transforms.assign(transforms, end);
+      map->layer_order.push_back(std::move(name));
+      data = end;
+      size = available - name_size - 2 * cells;
+    }
+    if (size != 0)
+      return nullptr;
+    return map;
+  }
+
+  std::vector<uint8_t> write_map(const Map &map) {
+    const auto w = map.bounds.w, h = map.bounds.h;
+    if(w <= 0 || h <= 0 || w > 65535 || h > 65535 || w > INT32_MAX / h ||
+       map.layer_order.empty() || map.layer_order.size() > 65535 || map.layer_order.size() != map.layers.size()) return {};
+    const size_t cells = size_t(w) * h;
+    std::vector<uint8_t> bytes{'B','T','M','P',current_version,0};
+    for(auto value : {unsigned(w), unsigned(h), unsigned(map.layer_order.size())}) {
+      bytes.push_back(uint8_t(value));
+      bytes.push_back(uint8_t(value >> 8));
+    }
+    for(size_t i = 0; i < map.layer_order.size(); ++i) {
+      const auto &name = map.layer_order[i];
+      const auto layer = map.layers.find(name);
+      if(name.empty() || name.size() > 255 || name.find('\0') != name.npos ||
+         !valid_utf8(reinterpret_cast<const uint8_t *>(name.data()), name.size()) ||
+         std::find(map.layer_order.begin(), map.layer_order.begin() + i, name) != map.layer_order.begin() + i ||
+         layer == map.layers.end() || layer->second.tiles.size() != cells || layer->second.transforms.size() != cells ||
+         std::any_of(layer->second.transforms.begin(), layer->second.transforms.end(), [](uint8_t t) { return t > 7; })) return {};
+      bytes.push_back(uint8_t(name.size()));
+      bytes.insert(bytes.end(), name.begin(), name.end());
+      const auto order = static_cast<uint32_t>(layer->second.layer);
+      for (unsigned shift = 0; shift < 32; shift += 8)
+        bytes.push_back(uint8_t(order >> shift));
+      bytes.insert(bytes.end(), layer->second.tiles.begin(), layer->second.tiles.end());
+      bytes.insert(bytes.end(), layer->second.transforms.begin(), layer->second.transforms.end());
+    }
+    return bytes;
+  }
+
+  bool Map::set_tile(const std::string &layer, Point cell, uint8_t tile, uint8_t transform) {
+    const auto index = tile_index(cell);
+    if(index < 0 || transform > 7) return false;
+    const auto found = layers.find(layer);
+    if(found == layers.end() || size_t(index) >= found->second.tiles.size() ||
+       size_t(index) >= found->second.transforms.size()) return false;
+    found->second.tiles[index] = tile;
+    found->second.transforms[index] = transform;
+    return true;
+  }
+
+  std::string_view tiled_map_path(std::string_view generated_scene) {
+    const auto first_break = generated_scene.find('\n');
+    if (first_break == std::string_view::npos)
+      return {};
+
+    auto without_cr = [](std::string_view line) {
+      if (!line.empty() && line.back() == '\r')
+        line.remove_suffix(1);
+      return line;
+    };
+    if (without_cr(generated_scene.substr(0, first_break)) != "scene 1 Tiled")
+      return {};
+
+    generated_scene.remove_prefix(first_break + 1);
+    const auto marker = without_cr(generated_scene.substr(0, generated_scene.find('\n')));
+    constexpr std::string_view prefix = "# blit-map ";
+    if (marker.substr(0, prefix.size()) != prefix)
+      return {};
+    return marker.substr(prefix.size());
+  }
+
 
   void Map::add_layer(std::string name, std::vector<uint8_t> tiles) {
     MapLayer &layer = layers[name];
@@ -15,6 +187,22 @@ namespace blit {
 
   Map::Map(Rect bounds) : bounds(bounds) {
     flags.resize(bounds.w * bounds.h);
+  }
+
+  bool Map::set_tile_size(int size) {
+    if(!valid_tile_size(size) || bounds.w > std::numeric_limits<int32_t>::max() / size ||
+       bounds.h > std::numeric_limits<int32_t>::max() / size) return false;
+    tile_size_ = size;
+    return true;
+  }
+
+  Point Map::cell_at(Point pixel) const {
+    const auto tile = [size = tile_size_](int32_t p) { return p / size - (p % size < 0); };
+    return {tile(pixel.x), tile(pixel.y)};
+  }
+
+  Rect Map::cell_rect(Point cell) const {
+    return {cell.x * tile_size_, cell.y * tile_size_, tile_size_, tile_size_};
   }
 
   int32_t Map::tile_index(Point p) {
@@ -29,20 +217,22 @@ namespace blit {
   }
 
   void MapLayer::mipmap_texture_span(Surface *dest, Point s, uint16_t c, Surface *sprites, Vec2 swc, Vec2 ewc) {
+    if(!c) return;
+    dest->alpha = 255;
+    if(sprites->mipmaps.empty() || (map->tile_size() % 2)) {
+      texture_span(dest, s, c, sprites, swc, ewc);
+      return;
+    }
     // calculate the mipmap index to use for drawing
     float span_length = (ewc - swc).length();
     float mipmap = ((span_length / float(c)) / 2.0f);
-    uint16_t mipmap_index = floorf(mipmap);
-    uint8_t blend = (mipmap - floorf(mipmap)) * 255;
-
-    if (mipmap_index >= sprites->mipmaps.size()) {
-        mipmap_index = int32_t(sprites->mipmaps.size()) - 1 < 0 ? 0 : uint16_t(sprites->mipmaps.size() - 1);
-    }
-
-    dest->alpha = 255;
+    unsigned last = static_cast<unsigned>(std::min<std::size_t>(15, sprites->mipmaps.size() - 1));
+    while(map->tile_size() % (1 << last)) --last;
+    auto mipmap_index = static_cast<unsigned>(std::min(mipmap, float(last)));
+    const uint8_t blend = (mipmap - floorf(mipmap)) * 255;
     texture_span(dest, s, c, sprites->mipmaps[mipmap_index], swc, ewc, mipmap_index);
 
-    if (++mipmap_index < sprites->mipmaps.size()) {
+    if (++mipmap_index <= last) {
       dest->alpha = blend;
       texture_span(dest, s, c, sprites->mipmaps[mipmap_index], swc, ewc, mipmap_index);
     }
@@ -51,33 +241,33 @@ namespace blit {
   void MapLayer::texture_span(Surface *dest, Point s, uint16_t c, Surface *sprites, Vec2 swc, Vec2 ewc, uint8_t mipmap_index) {
     BlitBlendFunc bbf = dest->bbf;
 
-    int world_size = map->bounds.w * 8;
-    int tile_size = 8 >> mipmap_index;
+    const auto world = map->pixel_size();
+    const int size = map->tile_size();
+    if(!c || mipmap_index >= 16 || size % (1 << mipmap_index)) return;
+    const int tile_size = size >> mipmap_index;
+    const int count = atlas_tile_count(sprites->bounds.w, sprites->bounds.h, tile_size);
+    if(!count) return;
+    const int columns = sprites->bounds.w / tile_size;
 
     Vec2 wc = swc;
     Vec2 dwc = (ewc - swc) / float(c);
     for (int x = s.x; x < s.x + c; x++) {
-      if (wc.x >= 0 && wc.x < world_size && wc.y >= 0 && wc.y < world_size) {
-        Point pt(wc.x / 8, wc.y / 8); // tile point
+      if (wc.x >= 0 && wc.x < world.w && wc.y >= 0 && wc.y < world.h) {
+        const Point pixel(wc.x, wc.y);
+        const Point pt(pixel.x / size, pixel.y / size);
 
         int16_t tile_id = tile_at(pt) - 1;
 
-        if (tile_id != -1) {
-          Point sp(
-            (tile_id & 0b1111) * tile_size,
-            (tile_id / 16) * tile_size
-          ); // sprite sheet coordinates
+        if (tile_id >= 0 && tile_id < count) {
+          const Point sp(tile_id % columns * tile_size, tile_id / columns * tile_size);
 
-          Point uv(
-            (uint8_t(wc.x) & 0b111) >> mipmap_index,
-            (uint8_t(wc.y) & 0b111) >> mipmap_index
-          ); // texture coordinates
+          Point uv((pixel.x % size) >> mipmap_index, (pixel.y % size) >> mipmap_index);
 
           // apply uv transform for tile
           uint8_t transform = transform_at(pt);
           if (transform & 0b010) { uv.y = (tile_size - 1) - uv.y; }
           if (transform & 0b100) { uv.x = (tile_size - 1) - uv.x; }
-          if (transform & 0b001) { uint8_t tmp = uv.x; uv.x = uv.y; uv.y = tmp; }
+          if (transform & 0b001) std::swap(uv.x, uv.y);
 
           Point t = sp + uv;
 
@@ -102,7 +292,7 @@ namespace blit {
 
   uint8_t MapLayer::transform_at(Point p) {
     int32_t ti = map->tile_index(p);
-    return ti == -1 ? 0 : transforms[ti];
+    return ti < 0 || static_cast<std::size_t>(ti) >= transforms.size() ? 0 : transforms[ti];
   }
 
   uint8_t Map::get_flags(Point p) {
@@ -115,10 +305,10 @@ namespace blit {
   }
 
   void Map::tiles_in_rect(Rect vp, std::function<void(Point)> f) {
-    int minx = vp.x / 8;
-    int maxx = ((vp.x + vp.w) / 8);
-    int miny = vp.y / 8;
-    int maxy = ((vp.y + vp.h) / 8);
+    const auto first = cell_at({vp.x, vp.y});
+    const auto last = cell_at({vp.x + vp.w, vp.y + vp.h});
+    int minx = first.x, maxx = last.x;
+    int miny = first.y, maxy = last.y;
 
     minx = minx < 0 ? 0 : minx;
     miny = miny < 0 ? 0 : miny;

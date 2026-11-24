@@ -1,5 +1,4 @@
 add_library(BlitHalSDL STATIC
-	DefaultMetadata.cpp
 	File.cpp
 	Input.cpp
 	JPEG.cpp
@@ -9,6 +8,27 @@ add_library(BlitHalSDL STATIC
 	Audio.cpp
 	System.cpp
 )
+
+if(MINGW)
+    # COFF weak data aliases do not reliably satisfy metadata references.
+    # Keep strong defaults outside BlitHalSDL's whole-archive link so games
+    # with generated metadata never pull this fallback object.
+    add_library(BlitDefaultMetadata STATIC DefaultMetadata.cpp)
+    target_compile_definitions(BlitDefaultMetadata PRIVATE BLIT_STRONG_DEFAULT_METADATA)
+    target_link_libraries(BlitHalSDL PUBLIC BlitDefaultMetadata)
+else()
+    target_sources(BlitHalSDL PRIVATE DefaultMetadata.cpp)
+endif()
+
+if(NOT EMSCRIPTEN AND NOT ANDROID)
+	target_sources(BlitHalSDL PRIVATE ../libs/world/input_actions.cpp)
+	target_include_directories(BlitHalSDL PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../libs/world>")
+	if(BLIT_WORLD_TESTS)
+		add_executable(blit_input_actions_tests ../libs/world/tests/input_actions_test.cpp)
+		target_link_libraries(blit_input_actions_tests PRIVATE BlitHalSDL GTest::gtest_main)
+		add_test(NAME InputActions.SDLBindings COMMAND blit_input_actions_tests)
+	endif()
+endif()
 
 function (find_sdl_lib lib_name header_name)
 	string(TOUPPER ${lib_name} VAR_PREFIX)
@@ -59,7 +79,7 @@ if(EMSCRIPTEN)
 else()
 
 	# fallback guess for SDL location on Windows
-	if(WIN32 AND NOT SDL2_DIR AND 32BLIT_DIR)
+	if(MSVC AND NOT SDL2_DIR AND 32BLIT_DIR)
 		set(SDL2_DIR "${32BLIT_DIR}/vs/sdl")
 	endif()
 
@@ -98,8 +118,53 @@ endif()
 
 target_link_libraries(BlitHalSDL PUBLIC BlitEngine ${SDL2_LIBRARIES} ${SDL2_IMAGE_LIBRARY} ${SDL2_NET_LIBRARY})
 
+if(NOT EMSCRIPTEN)
+	set(BLIT_MEMORY_CAP_MB 0 CACHE STRING "Simulator C++ heap cap in MiB (0 disables)")
+	if(NOT BLIT_MEMORY_CAP_MB MATCHES "^(0|[1-9][0-9]*)$")
+		message(FATAL_ERROR "BLIT_MEMORY_CAP_MB must be a nonnegative integer")
+	endif()
+	if(BLIT_MEMORY_CAP_MB GREATER 0)
+		target_sources(BlitHalSDL PRIVATE MemoryBudget.cpp)
+		target_compile_definitions(BlitHalSDL PRIVATE BLIT_MEMORY_CAP_MB=${BLIT_MEMORY_CAP_MB})
+	endif()
+
+	option(BLIT_DEV_BRIDGE "Enable the desktop development bridge in Debug builds" ON)
+	if(BLIT_DEV_BRIDGE)
+		set(bridge_dir "${CMAKE_CURRENT_LIST_DIR}/../libs/bridge")
+		target_sources(BlitHalSDL PRIVATE "$<$<CONFIG:Debug>:${bridge_dir}/bridge.cpp>")
+		target_include_directories(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:${bridge_dir}>")
+		target_compile_definitions(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:BLIT_DEV_BRIDGE=1>")
+		target_link_libraries(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:BlitWorld>")
+		if(WIN32)
+			target_link_libraries(BlitHalSDL PUBLIC "$<$<CONFIG:Debug>:ws2_32>")
+		endif()
+	endif()
+endif()
+
 # copy SDL2 dlls to build/install dir for windows users
 set(DLLS_TO_COPY)
+if(NOT SDL2_DLL AND WIN32 AND TARGET SDL2::SDL2)
+    get_target_property(sdl_type SDL2::SDL2 TYPE)
+    if(sdl_type STREQUAL "SHARED_LIBRARY")
+        get_target_property(SDL2_DLL SDL2::SDL2 IMPORTED_LOCATION)
+        if(NOT SDL2_DLL)
+            get_target_property(sdl_configs SDL2::SDL2 IMPORTED_CONFIGURATIONS)
+            if(CMAKE_BUILD_TYPE)
+                list(PREPEND sdl_configs "${CMAKE_BUILD_TYPE}")
+            endif()
+            foreach(config IN LISTS sdl_configs)
+                string(TOUPPER "${config}" config)
+                get_target_property(SDL2_DLL SDL2::SDL2 "IMPORTED_LOCATION_${config}")
+                if(SDL2_DLL)
+                    break()
+                endif()
+            endforeach()
+        endif()
+        if(NOT SDL2_DLL)
+            message(FATAL_ERROR "The SDL2 shared target does not provide a runtime DLL location.")
+        endif()
+    endif()
+endif()
 
 if(SDL2_DLL)
 	list(APPEND DLLS_TO_COPY ${SDL2_DLL})
@@ -111,6 +176,15 @@ endif()
 
 if(SDL2_NET_DLL)
 	list(APPEND DLLS_TO_COPY ${SDL2_NET_DLL})
+endif()
+
+if(TARGET blit_input_actions_tests)
+	foreach(DLL IN LISTS DLLS_TO_COPY)
+		add_custom_command(TARGET blit_input_actions_tests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${DLL}" "$<TARGET_FILE_DIR:blit_input_actions_tests>"
+			VERBATIM)
+	endforeach()
 endif()
 
 set(DLLS_TO_COPY ${DLLS_TO_COPY} PARENT_SCOPE)
@@ -213,6 +287,7 @@ function(blit_executable NAME)
 endfunction()
 
 function(blit_metadata TARGET FILE)
+	_blit_require_tools()
 	if(NOT EXISTS ${FILE})
 		set(FILE ${CMAKE_CURRENT_SOURCE_DIR}/${FILE})
 	endif()

@@ -66,9 +66,8 @@ set(CMAKE_INCLUDE_FLAG_ASM "-I")
 set(CMAKE_OBJCOPY ${PICO_OBJCOPY} CACHE FILEPATH "")
 set(CMAKE_OBJDUMP ${PICO_OBJDUMP} CACHE FILEPATH "")
 
-# Disable compiler checks.
-set(CMAKE_C_COMPILER_FORCED TRUE)
-set(CMAKE_CXX_COMPILER_FORCED TRUE)
+# Probe compiler capabilities without linking before the board SDK is initialized.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 # Add target system root to cmake find path.
 get_filename_component(PICO_COMPILER_DIR "${PICO_COMPILER_CC}" DIRECTORY)

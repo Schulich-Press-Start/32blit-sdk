@@ -68,7 +68,7 @@ namespace blit_linux {
     }
   }
 
-  void present_frame(const PanelBuffer &panel, const PanelFormat &format, const blit::SurfaceInfo &frame, const ScreenFit &fit) {
+  void present_frame(const PanelBuffer &panel, const PanelFormat &format, const blit::SurfaceInfo &frame, const blit::ScreenFit &fit) {
     const int out_width = frame.bounds.w * fit.scale;
     const int out_height = frame.bounds.h * fit.scale;
 

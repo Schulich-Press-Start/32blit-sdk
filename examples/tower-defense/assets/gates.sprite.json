@@ -1,0 +1,1 @@
+{"image":"assets/gates.png","frame_width":16,"frame_height":16,"clips":{"spawn":{"loop":true,"frames":[{"cell":0,"duration_ms":100}]},"goal":{"loop":true,"frames":[{"cell":1,"duration_ms":100}]}}}

@@ -4,11 +4,10 @@
  */
 #include <gtest/gtest.h>
 
-#include "screen_fit.hpp"
+#include "graphics/screen_fit.hpp"
 
 namespace {
-  using blit::Size;
-  using namespace blit_linux;
+  using namespace blit;
 
   /** \brief Compare a fit against the expected scale and position, printing all three on failure. */
   testing::AssertionResult fit_is(const ScreenFit &fit, int scale, int x, int y) {

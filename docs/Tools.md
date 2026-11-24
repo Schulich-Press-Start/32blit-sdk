@@ -10,9 +10,138 @@ pip3 install 32blit construct "bitstring<5"
 
 Head on over to https://github.com/32blit/32blit-tools for further documentation covering the installation of the new tools.
 
+- [Desktop development tools](#desktop-development-tools)
+  - [Scripted game input](#scripted-game-input)
+  - [Tiled maps and objects](#tiled-maps-and-objects)
+  - [Tile properties](#tile-properties)
+  - [Tiled project classes](#tiled-project-classes)
 - [Asset Pipeline](#asset-pipeline)
   - [Additional Options](#additional-options)
 - [Visual Studio](#visual-studio)
+
+# Desktop development tools
+
+This SDK also provides `blit` for the native SDL development workflow. It is separate from the upstream `32blit` asset packer and requires Python 3.9 or newer.
+
+```sh
+python -m pip install -e tools/blit-tools
+```
+
+Configure your game as **Debug** against this SDK. The bridge is enabled by default for native SDL Debug builds (`BLIT_DEV_BRIDGE=OFF` disables it); the code is not linked in Release, handheld, or browser builds. For an optimized Debug build with GCC or Clang, configure with `-DCMAKE_CXX_FLAGS_DEBUG="-O2 -g"`.
+
+If the game uses a `sdk::World`, link `BlitWorld` and call `sdk::bridge_attach(world)` from `init()` after setting up the World and its pools. Guard the `#include "bridge.hpp"` and the call with `#ifdef BLIT_DEV_BRIDGE`. If you use `SceneRuntime`, pass it too: `sdk::bridge_attach(world, &scenes)` enables scene actions and retains the prefab catalogue and stable bindings across restart. Without a World, the bridge still provides connection info, pause/step/resume, timing, and game-loop logs.
+
+Run the game yourself and connect a terminal, or let `blit dev` build and launch it:
+
+```sh
+./build/my-game --bridge 127.0.0.1:6132
+blit console --exec "set player.Transform2D.x 200" --exec "get player.Transform2D" --json
+```
+
+```sh
+blit dev --build-dir build --target my-game --exe build/my-game --build-on-save --scene levels/level1.scene
+```
+
+Use the actual executable path (with `.exe` and, for multi-config generators, the configuration folder where applicable). Run `blit dev` from the game project or pass `--project-dir`. Omit `--build-on-save` to rebuild from your IDE while `blit dev` watches the executable instead. A failed `blit dev` build does not stop the running game. A successful build requests a snapshot and restores it after `init()` in the new process. Only registered World state is restored; game globals, timers, audio, and other process state are initialized again.
+
+`--scene` watches an SDK scene that your game reads through the attached `SceneRuntime`. The game still loads its initial scene in `init()`; the watcher sends `load_scene` after a save settles. It works with or without `--build-on-save`. Use `--scene-watch levels/props.scene` for each included file you also want to watch. These paths are relative to the project, use `/`, and cannot contain spaces. A valid save replaces the live scene without rebuilding or restarting; an invalid save reports `file:line` and leaves the current scene active. This does not convert Tiled files; it watches SDK scene files.
+
+`blit console` with no arguments opens a prompt. It also accepts `--script FILE` and `--watch player.Transform2D.x`. In addition to SDK actions, it supports `hello`, `list`, `components`, `get`, `snapshot`, `pause`, `step`, `resume`, and `stats`. `step` requires a paused game. `stats` reports the last update and render times in microseconds. With `-DBLIT_MEMORY_CAP_MB=64` (example budget), it also reports `live_bytes` and `peak_bytes` for the game's C++ allocations. This opt-in simulator cap does not measure total process RAM or allocations through C APIs. Native SDL logs combined update/render work over 16.6 ms.
+
+The protocol is UTF-8 JSON Lines on IPv4 loopback only. The game accepts two clients and processes at most one command per simulation poll. Frames are capped at 1 MiB, and log notifications are best-effort. The native tools do not start an HTTP server or implement browser reload.
+
+The native simulator defaults to a 480×272 panel; launch the game with `--panel 640x480` to test a different panel. It uses the same integer-fit policy as `32blit-linux`. The game still chooses its own render resolution.
+
+## Scripted game input
+
+The native Debug bridge can drive `blit::buttons` without keyboard or controller events, even when the game window is not focused. On a headless machine with SDL's dummy drivers available, launch the same executable with:
+
+```sh
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy SDL_RENDER_DRIVER=software ./build/my-game --bridge 127.0.0.1:6132
+```
+
+Connect a TCP client to the bridge and send the following requests as separate JSON lines. Wait for each `{"id":...,"ok":true}` reply before sending the next request; log events have no `id`.
+
+```jsonl
+{"id":1,"pause":1}
+{"id":2,"buttons":16}
+{"id":3,"step":1}
+{"id":4,"get":"test.InputProbe"}
+{"id":5,"step":1}
+{"id":6,"buttons":0}
+{"id":7,"step":1}
+{"id":8,"buttons":null}
+{"id":9,"resume":1}
+```
+
+`buttons` accepts an unsigned 32-bit integer mask: left `1`, right `2`, up `4`, down `8`, A `16`, B `32`, X `64`, Y `128`, menu `256`, home `512`, and joystick click `1024`. Add the values for simultaneous holds. A mask replaces the physical button state until cleared, including across steps, `resume`, and client disconnect. Use `0` to hold nothing and `null` to return control to physical buttons. Analog inputs and desktop action mappings are not overridden.
+
+The game starts running; `pause` stops updates so you can inspect the baseline before stepping. Setting or clearing the mask does not advance a paused game. Each `step` runs one 10 ms game update. If A starts up, the example produces a press on the first step, holds A without another press on the second, and releases it on the third. The engine derives `pressed` and `released` from consecutive updates.
+
+To observe game-owned state, attach your World and expose named entities with registered components (for example, `test.InputProbe`); `get` reads these values without modifying them. Input and stepping do not require an attached World.
+
+## Tiled maps and objects
+
+With CMake 3.21+ and Python 3.9+, register the import on an existing game target. Keep the `SDK_COMPONENT` registrations in translation units linked by both the game and the host exporter:
+
+```cmake
+blit_component_metadata(game_registry registry.json components.cpp)
+blit_tiled_assets(my-game maps/level.tmx authoring.schema.json registry.json)
+```
+
+CMake exports `registry.json` under the build directory and generates `generated/maps/level.generated.scene` in the project. For a cross-build, pass a registry file from a separate native build. No `blit dev` process or Tiled installation is needed for CMake to import checked-in inputs.
+
+The schema explicitly maps object classes to registered fields. For example, a Tiled point `PlayerSpawn` can use a `pilot` prefab from the hand-authored scene:
+
+```json
+{"version":1,"classes":{"PlayerSpawn":{"shape":"point","prefab":"pilot",
+  "fields":{"Transform2D.x":"$x","Transform2D.y":"$y"}}}}
+```
+
+Add `include generated/maps/level.generated.scene` to the authored level. Read the generated scene through `SceneReader`. When `blit::tiled_map_path(text)` returns a path, validate it under the project and read the complete packed file into `blit::load_tiled_map(bytes, size)`. Stage the resulting `Map`; use `SceneReader::finish` to publish it only on a successful scene load. Use `Map::layer_order` when drawing in Tiled order. Ship the generated scene and the `.map` file it names alongside the authored data, and ignore `generated/` in version control. To clean up old content-addressed map files, stop the game, remove the generated directory, then rebuild.
+
+The importer also records the project-relative atlas path and transparency color in a `# blit-atlas` comment. It is not needed by the game. The native editor works directly with the SDK's BTMP files and does not invoke this importer.
+
+```sh
+blit import maps/level.tmx --schema authoring.schema.json --registry build/registry.json
+blit dev --build-dir build --target my-game --exe build/my-game --build-on-save \
+  --scene levels/level1.scene --tiled maps/level.tmx \
+  --tiled-schema authoring.schema.json --tiled-registry build/registry.json
+```
+
+`--tiled` is repeatable. It watches the TMX and referenced TSX files without sending those saves through the C++ build watcher. Supported inputs: finite orthogonal maps, 8×8 tiles, one atlas, CSV or base64 (optionally zlib), and explicitly mapped points/rectangles. Used tile IDs must fit the engine's one-byte index with `0` reserved for empty. Object references use the map path and Tiled object IDs.
+
+## Tile properties
+
+In `authoring.schema.json`, add `"tile_flags": {"solid": 0, "ladder": 1, "water": 2}` alongside `version` and `classes`. Each lowercase identifier gets an explicit, unique bit from 0 to 31. In Tiled, set a tile's matching custom property to **bool**; missing or false properties leave that bit clear. Unrelated properties are not imported as flags.
+
+`blit_tiled_assets` generates `tile_flags.hpp` for the game target. The map named by the generated scene has a companion file at the same path plus `.props`; ship it alongside the map. Load it into a staged `sdk::TileProps` (`tile_props.hpp`) with `props.load(bytes, size, sdk::tile_flag_schema)`. A `false` return rejects the scene load. Publish the table and map together in `SceneReader::finish` on success.
+
+When used with `blit_scene_game`, the scene-data target waits for the Tiled import targets before synchronization. Generated `.map.props` companions are staged and installed alongside the map, including paths outside `assets/` and `scenes/`.
+
+Run `python tools/blit-tools/tests/test_tiled_staging.py` to verify clean parallel imports, incremental property changes, companion staging, and safe pruning in a disposable fixture. It requires Python 3.9+, CMake 3.21+, a native C++ compiler, and Ninja or an installed generator selected through `CMAKE_GENERATOR`.
+
+```cpp
+bool is_solid(const sdk::TileProps &props, const blit::Point &cell, blit::MapLayer &ground) {
+  return props.has(ground.tile_at(cell), sdk::TileFlag::is_solid);
+}
+```
+
+`Map`'s imported IDs are one-based, so `tile_at` can go straight into `has`. For a zero-based `TileMap`, first handle its empty sentinel and then add 1 to the atlas index (without narrowing). Editing existing bool values in Tiled reloads without a C++ build; moving a bit or renaming a flag changes the schema and requires rebuilding. Reordering declarations does not change the schema.
+
+## Tiled project classes
+
+After exporting `registry.json`, generate or refresh the workspace and reopen it in Tiled:
+
+```sh
+blit tiled-project my-game.tiled-project --schema authoring.schema.json --registry build/registry.json
+```
+
+Select a generated class such as `PlayerSpawn` on a map object, or `TileFlags` on an atlas tile. Object properties are typed from their registered SDK fields; geometry mappings like `$x` and `$y` use the object's placement instead. Optional per-class `defaults` are keyed by Tiled property name. Explicit values in TMX win over defaults. A mapped property without a schema default must be set on the object.
+
+Reflected SDK `path` fields use Tiled **string** properties. Enter paths relative to the SDK project root, with `/` between folders. They may be blank or hold up to 63 UTF-8 bytes.
+
+Refresh after schema or component changes. It preserves unrelated classes, IDs, folders and extension settings. Keep the project's `32blit.sdk.generatedClasses` property: it identifies the generated entries that the tool may replace. The workspace is not an input to the SDK runtime.
 
 # Asset Pipeline
 

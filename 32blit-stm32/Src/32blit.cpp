@@ -370,6 +370,7 @@ void blit_init() {
 
   api.debug = blit_debug;
   api.now = HAL_GetTick;
+  api.get_wall_clock = nullptr; // no configured calendar RTC
   api.random = HAL_GetRandom;
   api.exit = blit_exit;
 

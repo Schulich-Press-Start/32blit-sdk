@@ -1,0 +1,8 @@
+{
+  "tileset": "assets/meadow.tileset.json",
+  "connections": {"west": {"scene": "scenes/main.scene", "offset_px": -128}},
+  "solid_overrides": [
+    {"x": 10, "y": 4, "solid": true},
+    {"x": 5, "y": 5, "solid": false}
+  ]
+}

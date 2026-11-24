@@ -1,0 +1,8 @@
+{
+  "image": "assets/garden.png",
+  "properties": [
+    "solid"
+  ],
+  "tile_size": 16,
+  "tiles": {}
+}

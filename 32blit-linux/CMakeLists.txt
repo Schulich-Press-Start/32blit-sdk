@@ -56,6 +56,7 @@ endfunction()
 # the game as the metadata_* strings declared in user_code.hpp. These
 # replace the weak defaults from default_metadata.cpp.
 function(blit_metadata TARGET FILE)
+	_blit_require_tools()
 	if(NOT EXISTS ${FILE})
 		set(FILE ${CMAKE_CURRENT_SOURCE_DIR}/${FILE})
 	endif()

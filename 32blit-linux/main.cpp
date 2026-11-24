@@ -38,7 +38,7 @@
 #include "display.hpp"
 #include "file.hpp"
 #include "input_evdev.hpp"
-#include "screen_fit.hpp"
+#include "graphics/screen_fit.hpp"
 #include "user_code.hpp"
 
 namespace blit_linux {
@@ -150,7 +150,7 @@ namespace blit_linux {
       if(new_surf_template.bounds.empty())
         new_surf_template.bounds = new_mode == blit::ScreenMode::lores ? lores_size : hires_size;
 
-      if(!screen_size_allowed(display_size(), new_surf_template.bounds))
+      if(!blit::screen_size_allowed(display_size(), new_surf_template.bounds))
         return false;
 
       switch(new_surf_template.format) {
@@ -347,6 +347,8 @@ namespace blit_linux {
       // get_screen_data: single buffer, the engine's screen pointer never changes
       nullptr,
       // set_framebuffer
+      nullptr,
+      // get_wall_clock
       nullptr,
     };
 
