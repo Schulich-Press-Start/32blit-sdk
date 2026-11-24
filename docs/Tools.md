@@ -117,6 +117,10 @@ In `authoring.schema.json`, add `"tile_flags": {"solid": 0, "ladder": 1, "water"
 
 `blit_tiled_assets` generates `tile_flags.hpp` for the game target. The map named by the generated scene has a companion file at the same path plus `.props`; ship it alongside the map. Load it into a staged `sdk::TileProps` (`tile_props.hpp`) with `props.load(bytes, size, sdk::tile_flag_schema)`. A `false` return rejects the scene load. Publish the table and map together in `SceneReader::finish` on success.
 
+When used with `blit_scene_game`, the scene-data target waits for the Tiled import targets before synchronization. Generated `.map.props` companions are staged and installed alongside the map, including paths outside `assets/` and `scenes/`.
+
+Run `python tools/blit-tools/tests/test_tiled_staging.py` to verify clean parallel imports, incremental property changes, companion staging, and safe pruning in a disposable fixture. It requires Python 3.9+, CMake 3.21+, a native C++ compiler, and Ninja or an installed generator selected through `CMAKE_GENERATOR`.
+
 ```cpp
 bool is_solid(const sdk::TileProps &props, const blit::Point &cell, blit::MapLayer &ground) {
   return props.has(ground.tile_at(cell), sdk::TileFlag::is_solid);

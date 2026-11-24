@@ -1,5 +1,4 @@
 add_library(BlitHalSDL STATIC
-	DefaultMetadata.cpp
 	File.cpp
 	Input.cpp
 	JPEG.cpp
@@ -9,6 +8,17 @@ add_library(BlitHalSDL STATIC
 	Audio.cpp
 	System.cpp
 )
+
+if(MINGW)
+    # COFF weak data aliases do not reliably satisfy metadata references.
+    # Keep strong defaults outside BlitHalSDL's whole-archive link so games
+    # with generated metadata never pull this fallback object.
+    add_library(BlitDefaultMetadata STATIC DefaultMetadata.cpp)
+    target_compile_definitions(BlitDefaultMetadata PRIVATE BLIT_STRONG_DEFAULT_METADATA)
+    target_link_libraries(BlitHalSDL PUBLIC BlitDefaultMetadata)
+else()
+    target_sources(BlitHalSDL PRIVATE DefaultMetadata.cpp)
+endif()
 
 if(NOT EMSCRIPTEN AND NOT ANDROID)
 	target_sources(BlitHalSDL PRIVATE ../libs/world/input_actions.cpp)
@@ -133,6 +143,28 @@ endif()
 
 # copy SDL2 dlls to build/install dir for windows users
 set(DLLS_TO_COPY)
+if(NOT SDL2_DLL AND WIN32 AND TARGET SDL2::SDL2)
+    get_target_property(sdl_type SDL2::SDL2 TYPE)
+    if(sdl_type STREQUAL "SHARED_LIBRARY")
+        get_target_property(SDL2_DLL SDL2::SDL2 IMPORTED_LOCATION)
+        if(NOT SDL2_DLL)
+            get_target_property(sdl_configs SDL2::SDL2 IMPORTED_CONFIGURATIONS)
+            if(CMAKE_BUILD_TYPE)
+                list(PREPEND sdl_configs "${CMAKE_BUILD_TYPE}")
+            endif()
+            foreach(config IN LISTS sdl_configs)
+                string(TOUPPER "${config}" config)
+                get_target_property(SDL2_DLL SDL2::SDL2 "IMPORTED_LOCATION_${config}")
+                if(SDL2_DLL)
+                    break()
+                endif()
+            endforeach()
+        endif()
+        if(NOT SDL2_DLL)
+            message(FATAL_ERROR "The SDL2 shared target does not provide a runtime DLL location.")
+        endif()
+    endif()
+endif()
 
 if(SDL2_DLL)
 	list(APPEND DLLS_TO_COPY ${SDL2_DLL})

@@ -37,7 +37,7 @@ function(collect_scene_entries directory output)
         else()
             string(TOLOWER "${relative}" lower)
             if(relative STREQUAL "blit-project.json" OR relative STREQUAL "registry.json" OR relative STREQUAL registry OR
-               lower MATCHES "^(assets|scenes)/|\\.(png|wav|font|scene|map|map\\.json|tileset\\.json|sprite\\.json|ui\\.json|audio\\.json|vfx\\.json)$")
+               lower MATCHES "^(assets|scenes)/|\\.(png|wav|font|scene|map|map\\.props|map\\.json|tileset\\.json|sprite\\.json|ui\\.json|audio\\.json|vfx\\.json)$")
                 list(APPEND entries "${relative}")
             endif()
         endif()

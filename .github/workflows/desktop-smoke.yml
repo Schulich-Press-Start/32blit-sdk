@@ -29,6 +29,10 @@ jobs:
         printf '%s\n' '{"version":1,"tile_flags":{"solid":0}}' > "$smoke_dir/schema.json"
         .venv/bin/blit tile-flags "$smoke_dir/schema.json" "$smoke_dir/tile_flags.hpp"
         grep -F 'is_solid = 0x00000001u,' "$smoke_dir/tile_flags.hpp"
+    - name: Verify generated scene staging
+      env:
+        CMAKE_GENERATOR: Unix Makefiles
+      run: .venv/bin/python tools/blit-tools/tests/test_tiled_staging.py
     # The release matrix doesn't build the Debug-only dev bridge. Link a desktop
     # executable against it without fetching any examples or needing a display.
     - name: Configure SDK Debug build

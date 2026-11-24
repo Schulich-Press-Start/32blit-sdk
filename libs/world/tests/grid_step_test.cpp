@@ -21,7 +21,11 @@ namespace {
     sdk::GridStepResult step(sdk::StepDirection direction, int elapsed = step_ms) {
       return sdk::grid_step(state, position, shape, direction, tile, step_ms, columns, rows, walkable, elapsed);
     }
-    blit::Point cell() const { return sdk::grid_cell(position, shape, tile); }
+    blit::Point cell() const {
+      blit::Point cell;
+      EXPECT_TRUE(sdk::grid_cell(position, shape, tile, cell));
+      return cell;
+    }
   };
 }
 
@@ -45,8 +49,41 @@ TEST(GridStep, PlacesFeetAnchoredColliderInItsCell) {
   sdk::grid_place(state, position, shape, tile);
   EXPECT_EQ(state.cell.x, 1);
   EXPECT_EQ(state.cell.y, 1);
-  EXPECT_EQ(sdk::grid_cell(position, shape, tile).x, 1);
-  EXPECT_EQ(sdk::grid_cell(position, shape, tile).y, 1);
+  blit::Point cell;
+  ASSERT_TRUE(sdk::grid_cell(position, shape, tile, cell));
+  EXPECT_EQ(cell.x, 1);
+  EXPECT_EQ(cell.y, 1);
+}
+
+TEST(GridStep, InvalidPlacementPreservesTransformAndSteppingState) {
+  const sdk::BoxCollider2D shape{0, 0, 8, 8};
+  for(const float x : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(), 1e20f, -1e20f}) {
+    sdk::Transform2D position{x, 27};
+    sdk::GridStepState state{{2, 3}, {3, 3}, sdk::StepDirection::right, sdk::StepDirection::right, 47};
+    blit::Point cell{77, 88};
+    EXPECT_FALSE(sdk::grid_cell(position, shape, tile, cell));
+    EXPECT_EQ(cell.x, 77);
+    EXPECT_EQ(cell.y, 88);
+    EXPECT_FALSE(sdk::grid_place(state, position, shape, tile));
+    EXPECT_EQ(state.cell.x, 2);
+    EXPECT_EQ(state.cell.y, 3);
+    EXPECT_EQ(state.destination.x, 3);
+    EXPECT_EQ(state.moving, sdk::StepDirection::right);
+    EXPECT_EQ(state.elapsed_ms, 47);
+    if(std::isnan(x)) EXPECT_TRUE(std::isnan(position.x));
+    else EXPECT_EQ(position.x, x);
+    EXPECT_EQ(position.y, 27);
+  }
+}
+
+TEST(GridStep, CellCentreAddsFloatOperandsInDoublePrecision) {
+  const sdk::Transform2D position{16777216.f, 0};
+  const sdk::BoxCollider2D shape{1, 0, 2, 2};
+  blit::Point cell;
+  ASSERT_TRUE(sdk::grid_cell(position, shape, 2, cell));
+  EXPECT_EQ(cell.x, 8388609);
+  EXPECT_EQ(cell.y, 0);
 }
 
 TEST(GridStep, RefusedStepTurnsTheActorWithoutMoving) {

@@ -1,6 +1,8 @@
+#include "SDL.h"
+
 #include <cstdint>
 #include <map>
-#include <mutex>
+#include <memory>
 #include <vector>
 
 class System;
@@ -15,6 +17,8 @@ class Input {
 
 		explicit Input(System *system);
     ~Input();
+    Input(const Input &) = delete;
+    Input &operator=(const Input &) = delete;
 
 		// Input handlers return true if they handled the event
 		bool handle_mouse(int button, bool state, int x, int y);
@@ -33,15 +37,24 @@ class Input {
 private:
 		System *target;
 
+    struct MutexDeleter {
+      void operator()(SDL_mutex *mutex) const { SDL_DestroyMutex(mutex); }
+    };
+    struct ControllerDeleter {
+      void operator()(SDL_GameController *controller) const { SDL_GameControllerClose(controller); }
+    };
+    using ControllerHandle = std::unique_ptr<SDL_GameController, ControllerDeleter>;
+
     struct GameController {
-      SDL_GameController *handle;
+      ControllerHandle handle;
       SDL_JoystickID instance_id;
       bool can_rumble;
       uint32_t held_buttons = 0;
     };
 
     // Hotplug runs on the event thread, but rumble runs on the game thread.
-    std::mutex controllers_mutex;
+    // Construct before opening controllers, and destroy after closing them.
+    std::unique_ptr<SDL_mutex, MutexDeleter> controllers_mutex;
     std::vector<GameController> game_controllers;
 
     void _virtual_analog(int, int, int, int);

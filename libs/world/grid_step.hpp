@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <limits>
 
 #include "../../32blit/types/point.hpp"
 #include "registry.hpp"
@@ -46,26 +47,33 @@ namespace sdk {
                       float(cell.y) * float(tile_size) + slack_y - shape.offset_y);
   }
 
-  /// Cell containing the centre of the actor's box. Works for any positive box size.
-  inline blit::Point grid_cell(const Transform2D &position, const BoxCollider2D &shape, int tile_size) {
-    if(tile_size <= 0) return {};
-    const double centre_x = double(position.x + shape.offset_x) + double(shape.width) * 0.5;
-    const double centre_y = double(position.y + shape.offset_y) + double(shape.height) * 0.5;
-    return {int(std::floor(centre_x / tile_size)), int(std::floor(centre_y / tile_size))};
+  /// Resolve the collider centre to a cell. Invalid geometry leaves `cell` unchanged.
+  inline bool grid_cell(const Transform2D &position, const BoxCollider2D &shape, int tile_size, blit::Point &cell) {
+    if(tile_size <= 0 || !std::isfinite(position.x) || !std::isfinite(position.y) ||
+       !std::isfinite(shape.offset_x) || !std::isfinite(shape.offset_y) ||
+       !std::isfinite(shape.width) || !std::isfinite(shape.height) || !(shape.width > 0) || !(shape.height > 0)) return false;
+    const double x = std::floor((double(position.x) + double(shape.offset_x) + double(shape.width) * .5) / tile_size);
+    const double y = std::floor((double(position.y) + double(shape.offset_y) + double(shape.height) * .5) / tile_size);
+    constexpr auto low = std::numeric_limits<int>::min(), high = std::numeric_limits<int>::max();
+    if(!std::isfinite(x) || !std::isfinite(y) || x < low || x > high || y < low || y > high) return false;
+    cell = {static_cast<int>(x), static_cast<int>(y)};
+    return true;
   }
 
   /// Snap an actor onto the cell containing its box centre and centre it there.
   /// Facing is preserved so the sprite keeps its last direction; movement is cleared.
-  inline void grid_place(GridStepState &state, Transform2D &position, const BoxCollider2D &shape,
+  inline bool grid_place(GridStepState &state, Transform2D &position, const BoxCollider2D &shape,
                          int tile_size) {
-    state.cell = grid_cell(position, shape, tile_size);
-    state.destination = state.cell;
+    blit::Point cell;
+    if(!grid_cell(position, shape, tile_size, cell)) return false;
+    const auto origin = grid_box_origin(cell, tile_size, shape);
+    if(!std::isfinite(origin.x) || !std::isfinite(origin.y)) return false;
+    state.cell = state.destination = cell;
     state.moving = StepDirection::none;
     state.elapsed_ms = 0;
-    if(tile_size <= 0 || !(shape.width > 0) || !(shape.height > 0)) return;
-    const auto origin = grid_box_origin(state.cell, tile_size, shape);
     position.x = origin.x;
     position.y = origin.y;
+    return true;
   }
 
   /**
@@ -94,6 +102,7 @@ namespace sdk {
     if(tile_size <= 0 || step_ms <= 0 || columns <= 0 || rows <= 0 || elapsed_ms < 0 ||
        !(shape.width > 0 && shape.height > 0) || !std::isfinite(shape.width) || !std::isfinite(shape.height) ||
        !std::isfinite(shape.offset_x) || !std::isfinite(shape.offset_y)) return result;
+    if(state.cell.x < 0 || state.cell.y < 0 || state.cell.x >= columns || state.cell.y >= rows) return result;
 
     if(state.moving == StepDirection::none && requested != StepDirection::none) {
       state.facing = requested;

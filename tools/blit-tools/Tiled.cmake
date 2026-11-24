@@ -56,4 +56,9 @@ function(blit_tiled_assets TARGET MAP SCHEMA REGISTRY)
 		DEPFILE "${depfile}" VERBATIM)
 	add_custom_target(${TARGET}_tiled_${id} DEPENDS "${stamp}" "${scene}")
 	add_dependencies(${TARGET} ${TARGET}_tiled_${id})
+	# Staging is another dependency of the executable, so it must wait for the
+	# import itself rather than race it during a parallel build.
+	if(TARGET ${TARGET}_scene_data)
+		add_dependencies(${TARGET}_scene_data ${TARGET}_tiled_${id})
+	endif()
 endfunction()

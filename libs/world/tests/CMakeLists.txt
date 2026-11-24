@@ -3,10 +3,14 @@
 include(FetchContent)
 
 # GoogleTest, pinned to a release and checked against its hash.
+set(extract_timestamp)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+    list(APPEND extract_timestamp DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+endif()
 FetchContent_Declare(googletest
 	URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
 	URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
-	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    ${extract_timestamp}
 )
 # keep gtest out of `install` and the release zips
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
