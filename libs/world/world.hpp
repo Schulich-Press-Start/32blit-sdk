@@ -17,6 +17,18 @@ namespace sdk {
   class ComponentPoolBase;
   template<class T> class ComponentPool;
 
+  namespace detail {
+    template<class Error>
+    [[noreturn]] void world_setup_error(const char *message) {
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+      throw Error(message);
+#else
+      (void)message;
+      std::terminate();
+#endif
+    }
+  }
+
   /// Fixed entity budget; construction allocates, create/destroy never do.
   /// Non-copyable/non-movable so attached pools keep a stable owner.
   class World {
@@ -165,7 +177,7 @@ namespace sdk {
       return index == UINT16_MAX ? nullptr : at(index);
     }
     static uint16_t checked_capacity(const World &world, uint16_t capacity) {
-      if(capacity > world.capacity()) throw std::invalid_argument("component capacity exceeds entity budget");
+      if(capacity > world.capacity()) detail::world_setup_error<std::invalid_argument>("component capacity exceeds entity budget");
       return capacity;
     }
     T *at(uint16_t index) { return std::launder(reinterpret_cast<T *>(data_[index].bytes)); }

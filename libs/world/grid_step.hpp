@@ -52,8 +52,10 @@ namespace sdk {
     if(tile_size <= 0 || !std::isfinite(position.x) || !std::isfinite(position.y) ||
        !std::isfinite(shape.offset_x) || !std::isfinite(shape.offset_y) ||
        !std::isfinite(shape.width) || !std::isfinite(shape.height) || !(shape.width > 0) || !(shape.height > 0)) return false;
-    const double x = std::floor((double(position.x) + double(shape.offset_x) + double(shape.width) * .5) / tile_size);
-    const double y = std::floor((double(position.y) + double(shape.offset_y) + double(shape.height) * .5) / tile_size);
+    // The toolchain may make unsuffixed floating literals single precision.
+    constexpr double half = double(.5f);
+    const double x = std::floor((double(position.x) + double(shape.offset_x) + double(shape.width) * half) / tile_size);
+    const double y = std::floor((double(position.y) + double(shape.offset_y) + double(shape.height) * half) / tile_size);
     constexpr auto low = std::numeric_limits<int>::min(), high = std::numeric_limits<int>::max();
     if(!std::isfinite(x) || !std::isfinite(y) || x < low || x > high || y < low || y > high) return false;
     cell = {static_cast<int>(x), static_cast<int>(y)};

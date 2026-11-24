@@ -12,7 +12,7 @@ namespace sdk {
       auto last = last_id.load(std::memory_order_relaxed);
       do {
         if(last == std::numeric_limits<uint32_t>::max())
-          throw std::overflow_error("World ID space exhausted");
+          detail::world_setup_error<std::overflow_error>("World ID space exhausted");
       } while(!last_id.compare_exchange_weak(last, last + 1, std::memory_order_relaxed));
       return last + 1;
     }
@@ -120,10 +120,10 @@ namespace sdk {
 
   ComponentPoolBase::ComponentPoolBase(World &world, const ComponentInfo *info)
     : world_(&world), component_id_(info ? info->id : UINT16_MAX), next_(world.pools_) {
-    if(world.querying_) throw std::logic_error("cannot attach a component pool during a query");
+    if(world.querying_) detail::world_setup_error<std::logic_error>("cannot attach a component pool during a query");
     if(info) {
       auto *&registered = world.registered_pools_[component_id_];
-      if(registered) throw std::invalid_argument("component pool already attached");
+      if(registered) detail::world_setup_error<std::invalid_argument>("component pool already attached");
       registered = this;
     }
     world.pools_ = this;

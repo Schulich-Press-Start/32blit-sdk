@@ -34,6 +34,7 @@ This is an optional HAL capability added in firmware API 0.3. Existing apps rema
 
 - An entity is a handle, not a pointer. Check the result of `world.create()` or `world.find()` and don’t retain component pointers across removal or scene reload. `world.get<T>()` returns `nullptr` when the entity does not have that component.
 - Register a custom data type once using `SDK_COMPONENT`. Attach a `ComponentPool<T>` to the `World` before loading a scene that uses it. Budget capacity for both the world and its pools; do not assume registration creates storage.
+- Invalid pool setup (duplicate pools, a pool larger than its world, or attachment during a query) throws on exception-enabled builds and terminates on exception-free builds such as STM32. Normal runtime budget exhaustion still returns an invalid handle or `nullptr`.
 - Use `world.each<A, B>(...)` for systems that need both components. Update fields inside the callback, but create, destroy, add, and remove after the query completes. Don’t depend on query order.
 - Author repeatable values on a prefab. Instance overrides beat prefab values, which beat C++ defaults. Keep transient state such as score or current velocity in gameplay code unless you deliberately need to serialize it.
 - `Transform2D` gives an entity's position, `Sprite` selects artwork and a clip, and `BoxCollider2D` gives its axis-aligned shape. `GameScene` draws sprites; game code decides what happens when two shapes overlap.
