@@ -165,9 +165,25 @@ With `-DCMAKE_TOOLCHAIN_FILE=t113.toolchain` in place of `-D32BLIT_LINUX=ON`, th
 
 Add new tests as `tests/<name>_test.cpp` and list them in `tests/CMakeLists.txt`.
 
+## Audio
+
+Audio output is supported via ALSA (tinyalsa, BSD license). The port opens the
+codec's PCM device (`hw:0,0` by default) and plays the engine's mixed audio
+stream on a dedicated thread so the game loop never blocks.
+
+| Parameter | Value |
+|-----------|-------|
+| Format    | Mono, signed 16-bit |
+| Sample rate | 22050 Hz (`blit::sample_rate`) |
+| Buffering | 256-frame periods (~11.6 ms), 3 periods |
+| Underrun recovery | `pcm_prepare()`, counted, non-fatal |
+| Thread    | Dedicated `std::thread`; game thread never blocks |
+| Mixer     | Codec volume left at fixed level (system menu controls later) |
+
+The `audio-test` and `waveform-demo` examples exercise this path.
+
 ## Not supported yet
 
-- **Audio:** the engine mixes it, but nothing plays it.
 - **Vsync with the framebuffer fallback:** the framebuffer device can't page-flip, so frames can tear when DRM isn't available.
 - **JPEG decoding:** `blit::decode_jpeg_*` crashes on this port (the `jpeg` example builds but crashes when it decodes).
 - **Multiplayer:** the link always reports "not connected".

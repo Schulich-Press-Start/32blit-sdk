@@ -34,6 +34,7 @@
 #include "engine/api_private.hpp"
 #include "engine/engine.hpp"
 
+#include "audio_alsa.hpp"
 #include "console.hpp"
 #include "display.hpp"
 #include "file.hpp"
@@ -76,8 +77,12 @@ namespace blit_linux {
     constexpr uint32_t exit_key_release_wait_ms = 2000;
     ///@}
 
-    /// Audio channels the engine mixes. Nothing plays them yet: the port has no audio output.
+    /// Audio channels the engine mixes. Played by the ALSA audio thread below.
     blit::AudioChannel channels[CHANNEL_COUNT];
+
+    /// ALSA audio output thread. Plays the mixed audio from `channels` through
+    /// the codec's PCM device. Started in main(), stopped in shutdown_port().
+    AudioALSA audio;
 
     /// `--launch_path` argument: a file the game was asked to open (as on the 32blit console).
     const char *launch_path = nullptr;
@@ -117,6 +122,7 @@ namespace blit_linux {
      */
     void shutdown_port() {
       input_wait_released(exit_key_release_wait_ms);
+      audio.shutdown();
       input_shutdown();
       display_shutdown();
       console_restore();
@@ -488,6 +494,11 @@ int main(int argc, char *argv[]) {
 
   if(!display_init(display_backend, display_scaler))
     return EXIT_FAILURE;
+
+  // Audio is best-effort: if the codec device can't be opened, the game
+  /// still runs silently.
+  if(!audio.init())
+    fprintf(stderr, "ALSA: audio output unavailable, running silently\n");
 
   // big enough for the largest screen a game may ask for: the whole panel, 3 bytes per pixel
   const blit::Size panel = display_size();

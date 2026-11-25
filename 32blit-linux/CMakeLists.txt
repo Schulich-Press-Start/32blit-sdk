@@ -16,9 +16,20 @@ add_library(BlitHalLinux STATIC
 	input_evdev.cpp
 	main.cpp
 	panel.cpp
+	audio_alsa.cpp
+	tinyalsa/src/pcm.c
+	tinyalsa/src/pcm_hw.c
+	tinyalsa/src/limits.c
 )
 
 target_link_libraries(BlitHalLinux PUBLIC BlitEngine)
+
+# Vendored tinyalsa headers. tinyalsa/src/ is also needed because pcm.c and
+# pcm_hw.c include "pcm_io.h" with a quoted path.
+target_include_directories(BlitHalLinux PUBLIC
+	${CMAKE_CURRENT_SOURCE_DIR}/tinyalsa/include
+	${CMAKE_CURRENT_SOURCE_DIR}/tinyalsa/src
+)
 
 # libdrm, for the DRM/KMS display (display_drm.cpp). PC builds use the distro's
 # package; the T113 build uses the one tools/build-libdrm.sh installs into the
