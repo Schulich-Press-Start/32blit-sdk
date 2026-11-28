@@ -7,6 +7,8 @@
 
 namespace blit_linux {
 
+std::mutex g_audio_mutex;
+
 AudioALSA::AudioALSA() {
   pcm_cfg_ = {};
   pcm_cfg_.channels = 1;
@@ -93,6 +95,7 @@ void AudioALSA::run() {
     // get_audio_frame() returns the next mixed sample (unsigned 16-bit,
     // offset by 0x8000 to make it signed).
     for (unsigned int f = 0; f < frame_count; f++) {
+      std::lock_guard<std::mutex> lock(g_audio_mutex);
       int32_t sample = static_cast<int32_t>(blit::get_audio_frame()) - 0x8000;
       if (sample > 32767)
         sample = 32767;

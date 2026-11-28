@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <random>
 #include <string>
 #include <vector>
@@ -43,6 +44,8 @@
 #include "user_code.hpp"
 
 namespace blit_linux {
+
+extern std::mutex g_audio_mutex;
 
   namespace {
     /** \name Screen
@@ -387,8 +390,13 @@ namespace blit_linux {
           home_down = false;
         }
 
-        // runs update() as many times as needed; returns ms until the next update is due
-        int ms_to_update = blit::tick(time);
+        // runs update() as many times as needed; returns ms until the next update is due.
+        // Hold the audio mutex so the audio thread can't read channel state mid-tick.
+        int ms_to_update;
+        {
+          std::lock_guard<std::mutex> lock(g_audio_mutex);
+          ms_to_update = blit::tick(time);
+        }
 
         uint64_t now_us = elapsed_us();
         if(now_us >= next_frame_us && display_ready()) {

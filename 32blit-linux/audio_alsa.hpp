@@ -2,12 +2,19 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <thread>
 
 #include "audio/audio.hpp"
 #include "tinyalsa/include/tinyalsa/pcm.h"
 
 namespace blit_linux {
+
+/// Global mutex protecting the engine's audio channel state so the game
+/// thread (blit::tick) and the audio thread (blit::get_audio_frame) never
+/// read/write channel state simultaneously. Eliminates torn reads and
+/// audio jitter without touching the shared engine code.
+extern std::mutex g_audio_mutex;
 
 /// ALSA audio output for the 32blit-linux port.
 ///
@@ -17,7 +24,9 @@ namespace blit_linux {
 ///
 /// Format: mono, signed 16-bit, 22050 Hz (\c blit::sample_rate).
 /// Buffering: 256-frame periods (~11.6 ms), 3 periods in the ring.
-/// Underruns recover via pcm_prepare() and are counted.
+/// Underrun recovery via pcm_prepare(), counted, non-fatal.
+/// Thread: Dedicated \c std::thread; game thread never blocks.
+/// Mixer: Codec volume left at fixed level (system menu controls later).
 class AudioALSA {
 public:
   AudioALSA();
@@ -32,7 +41,7 @@ public:
   void shutdown();
 
   /// Number of underruns since init() (for diagnostics / acceptance testing).
-  unsigned int underruns() const { return underruns_; }
+  unsigned int underruns() const { return underruns_.load(); }
 
 private:
   void run();                  // audio thread entry point
