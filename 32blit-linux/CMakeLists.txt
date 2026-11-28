@@ -6,6 +6,30 @@
 #   blit_executable(NAME sources...)  - build a game
 #   blit_metadata(TARGET metadata.yml) - attach title/author/version to it
 
+# On other systems (macOS) only the unit tests build: the port itself needs
+# Linux's DRM, input and console APIs. Games are still defined, so a project's
+# CMakeLists works unchanged, but left out of the build.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	if(NOT BLIT_LINUX_TESTS)
+		message(FATAL_ERROR "32blit-linux games build only for Linux, not ${CMAKE_SYSTEM_NAME}.\n"
+			"Desktop (SDL) build: configure without -D32BLIT_LINUX=ON.\n"
+			"T113 build: configure with -DCMAKE_TOOLCHAIN_FILE=<32blit-sdk>/t113.toolchain instead.\n"
+			"-DBLIT_LINUX_TESTS=ON builds just the port's unit tests here.\n")
+	endif()
+
+	function(blit_executable NAME)
+		message(STATUS "Skipping ${NAME}: 32blit-linux games build only for Linux")
+		blit_executable_args(${ARGN})
+		add_executable(${NAME} EXCLUDE_FROM_ALL ${SOURCES})
+	endfunction()
+
+	function(blit_metadata TARGET FILE)
+	endfunction()
+
+	add_subdirectory(tests)
+	return()
+endif()
+
 add_library(BlitHalLinux STATIC
 	console.cpp
 	default_metadata.cpp

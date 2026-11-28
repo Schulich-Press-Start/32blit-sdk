@@ -200,6 +200,33 @@ jobs:
         cmake --build . --config $BUILD_TYPE -j 2
         ccache --show-stats || true
 
+    # 32blit-linux on macOS: its unit tests run natively, and games cross-build for the T113
+    - name: 32blit-linux unit tests
+      if: matrix.name == 'macOS'
+      shell: bash
+      run: |
+        cmake -S $GITHUB_WORKSPACE -B ${{runner.workspace}}/build.linux-tests -D32BLIT_LINUX=ON -DBLIT_LINUX_TESTS=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build ${{runner.workspace}}/build.linux-tests -j 3
+        ctest --test-dir ${{runner.workspace}}/build.linux-tests --output-on-failure
+
+    - name: Cache T113 toolchain
+      if: matrix.name == 'macOS'
+      uses: actions/cache@v6
+      with:
+        path: ~/x-tools
+        key: t113-toolchain-${{runner.os}}-${{hashFiles('tools/get-t113-toolchain.sh', 'tools/build-libdrm.sh')}}
+
+    - name: T113 cross-build
+      if: matrix.name == 'macOS'
+      shell: bash
+      run: |
+        brew install llvm lld pkgconf
+        tools/get-t113-toolchain.sh
+        tools/build-libdrm.sh
+        cmake -S $GITHUB_WORKSPACE -B ${{runner.workspace}}/build.t113 -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/t113.toolchain -DBLIT_LINUX_TESTS=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build ${{runner.workspace}}/build.t113 -j 3
+        file ${{runner.workspace}}/build.t113/examples/raycaster/raycaster | grep 'ELF 32-bit LSB executable, ARM'
+
     - name: Prepare Artifact
       if: github.event_name != 'release'
       shell: bash

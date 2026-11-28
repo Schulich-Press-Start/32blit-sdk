@@ -10,15 +10,33 @@
  */
 #include <gtest/gtest.h>
 
+#include <climits>
 #include <filesystem>
 #include <string>
 
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 #include "file.hpp"
 
 namespace {
   using namespace blit_linux;
+
+  /** \brief Absolute path of this test executable, with symlinks resolved like file.cpp does. */
+  std::filesystem::path executable_path() {
+#ifdef __APPLE__
+    char buf[PATH_MAX];
+    uint32_t size = sizeof(buf);
+    if(_NSGetExecutablePath(buf, &size) != 0)
+      return {};
+    return std::filesystem::canonical(buf);
+#else
+    return std::filesystem::read_symlink("/proc/self/exe");
+#endif
+  }
 
   /** \brief Gives each test a clean save folder and removes it afterwards. */
   class FileTest : public ::testing::Test {
@@ -26,7 +44,7 @@ namespace {
     void TearDown() override {
       // Delete only this test's own folder, and only if it really is inside saves/,
       // so a broken title check can't make a test delete the build folder.
-      const std::string saves = (std::filesystem::read_symlink("/proc/self/exe").parent_path() / "saves/").string();
+      const std::string saves = (executable_path().parent_path() / "saves/").string();
       const std::string folder = get_save_path();
 
       if(folder.compare(0, saves.size(), saves) == 0 && folder.find("/..") == std::string::npos)
