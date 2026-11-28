@@ -19,6 +19,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <cstdlib>
+#include <mach-o/dyld.h>
+#endif
+
 namespace blit_linux {
 
   namespace {
@@ -50,6 +55,15 @@ namespace blit_linux {
     /** \brief Directory containing the running executable, ending in `/`. */
     std::string executable_directory() {
       char buf[PATH_MAX];
+#ifdef __APPLE__
+      // macOS has no /proc; only the unit tests run there
+      uint32_t size = sizeof(buf);
+      char resolved[PATH_MAX];
+      if(_NSGetExecutablePath(buf, &size) != 0 || !realpath(buf, resolved))
+        return "./";
+
+      std::string path(resolved);
+#else
       ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
 
       if(len <= 0)
@@ -57,6 +71,7 @@ namespace blit_linux {
 
       buf[len] = '\0';
       std::string path(buf);
+#endif
       return path.substr(0, path.find_last_of('/') + 1);
     }
 

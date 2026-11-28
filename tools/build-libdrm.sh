@@ -9,9 +9,9 @@
 # The toolchain folder defaults to $T113_TOOLCHAIN_DIR, otherwise the place
 # tools/get-t113-toolchain.sh installs to. Run that script first.
 #
-# Needs: curl, sha256sum, tar with xz support, python3 with venv (for meson
-# and ninja, installed into a private folder under ~/.cache). Runs on x86-64
-# Linux (or WSL).
+# Needs: curl, sha256sum (or shasum), tar with xz support, python3 with venv
+# (for meson and ninja, installed into a private folder under ~/.cache). Runs
+# on x86-64 Linux (or WSL), and on macOS with Homebrew's llvm and lld.
 #
 # PC (x86) builds don't use this: install the distro's package instead
 # (Debian/Ubuntu: sudo apt install libdrm-dev).
@@ -49,17 +49,45 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "Downloading libdrm $VERSION..."
 curl -fL --retry 3 -o "$WORK/libdrm.tar.xz" "$URL"
-echo "$SHA256  $WORK/libdrm.tar.xz" | sha256sum -c -
+if command -v sha256sum >/dev/null; then
+	echo "$SHA256  $WORK/libdrm.tar.xz" | sha256sum -c -
+else
+	echo "$SHA256  $WORK/libdrm.tar.xz" | shasum -a 256 -c -
+fi
 tar -C "$WORK" -xf "$WORK/libdrm.tar.xz"
+
+CPU_ARGS="'-mcpu=cortex-a7', '-mfpu=neon-vfpv4', '-mfloat-abi=hard'"
+
+if [ "$(uname -s)" = Darwin ]; then
+	# Bootlin's gcc is a Linux program; use Homebrew's clang with its sysroot, like t113.toolchain
+	LLVM=${T113_LLVM_DIR:-$(brew --prefix llvm 2>/dev/null || true)}
+	LLD=$LLVM/bin/ld.lld
+	[ -x "$LLD" ] || LLD=$(brew --prefix lld 2>/dev/null || true)/bin/ld.lld
+	if [ ! -x "$LLVM/bin/clang" ] || [ ! -x "$LLD" ]; then
+		echo "T113 builds on macOS need Homebrew's LLVM and lld: brew install llvm lld" >&2
+		exit 1
+	fi
+	GCC_DIR=$(echo "$TOOLCHAIN"/lib/gcc/$TARGET/*)
+	CC="'$LLVM/bin/clang', '--target=arm-linux-musleabihf', '--sysroot=$SYSROOT', '--gcc-install-dir=$GCC_DIR'"
+	AR=$LLVM/bin/llvm-ar
+	STRIP=$LLVM/bin/llvm-strip
+	LINK_ARGS="'--ld-path=$LLD'"
+else
+	CC="'$TOOLCHAIN/bin/$TARGET-gcc'"
+	AR=$TOOLCHAIN/bin/$TARGET-ar
+	STRIP=$TOOLCHAIN/bin/$TARGET-strip
+	LINK_ARGS=
+fi
 
 cat > "$WORK/cross.ini" <<EOF
 [binaries]
-c = '$TOOLCHAIN/bin/$TARGET-gcc'
-ar = '$TOOLCHAIN/bin/$TARGET-ar'
-strip = '$TOOLCHAIN/bin/$TARGET-strip'
+c = [$CC]
+ar = '$AR'
+strip = '$STRIP'
 
 [built-in options]
-c_args = ['-mcpu=cortex-a7', '-mfpu=neon-vfpv4', '-mfloat-abi=hard']
+c_args = [$CPU_ARGS]
+c_link_args = [$LINK_ARGS]
 
 [host_machine]
 system = 'linux'

@@ -7,7 +7,8 @@
 # else on the device. The compiler is Bootlin's armv7-eabihf musl toolchain
 # (tools/get-t113-toolchain.sh downloads it). musl, because it links fully
 # static cleanly; glibc's static build can't use getpwnam(), dlopen() and
-# similar.
+# similar. On macOS, Homebrew's clang compiles against that same download
+# instead (see below).
 #
 # Where the toolchain is: the T113_TOOLCHAIN_DIR CMake or environment
 # variable, otherwise ~/x-tools/<toolchain name>, where the script puts it.
@@ -31,14 +32,52 @@ if(NOT EXISTS ${T113_TOOL_PREFIX}gcc)
 	message(FATAL_ERROR "T113 toolchain not found in ${T113_TOOLCHAIN_DIR}\nRun 32blit-sdk/tools/get-t113-toolchain.sh, or set T113_TOOLCHAIN_DIR to where it is\n")
 endif()
 
-set(CMAKE_C_COMPILER ${T113_TOOL_PREFIX}gcc)
-set(CMAKE_CXX_COMPILER ${T113_TOOL_PREFIX}g++)
 set(CMAKE_SYSROOT ${T113_TOOLCHAIN_DIR}/arm-buildroot-linux-musleabihf/sysroot)
-
 set(T113_CPU_FLAGS "-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard")
+
+if(CMAKE_HOST_APPLE)
+	# Bootlin's compilers are x86-64 Linux programs, so on macOS Homebrew's
+	# clang and lld (brew install llvm lld) build against the same sysroot,
+	# libstdc++ and libgcc from the Bootlin download instead.
+	if(NOT T113_LLVM_DIR)
+		if(DEFINED ENV{T113_LLVM_DIR})
+			set(T113_LLVM_DIR $ENV{T113_LLVM_DIR})
+		elseif(EXISTS /opt/homebrew/opt/llvm)
+			set(T113_LLVM_DIR /opt/homebrew/opt/llvm)
+		else()
+			set(T113_LLVM_DIR /usr/local/opt/llvm)
+		endif()
+	endif()
+	set(T113_LLVM_DIR ${T113_LLVM_DIR} CACHE PATH "LLVM folder (Homebrew's llvm) for T113 builds on macOS")
+	list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES T113_LLVM_DIR)
+
+	find_program(T113_LLD ld.lld HINTS ${T113_LLVM_DIR}/bin /opt/homebrew/opt/lld/bin /usr/local/opt/lld/bin NO_DEFAULT_PATH)
+	if(NOT EXISTS ${T113_LLVM_DIR}/bin/clang OR NOT T113_LLD)
+		message(FATAL_ERROR "T113 builds on macOS need Homebrew's LLVM and lld\nRun: brew install llvm lld\nOr set T113_LLVM_DIR to an LLVM folder with clang and ld.lld\n")
+	endif()
+
+	file(GLOB T113_GCC_DIR LIST_DIRECTORIES true ${T113_TOOLCHAIN_DIR}/lib/gcc/arm-buildroot-linux-musleabihf/*)
+
+	set(CMAKE_C_COMPILER ${T113_LLVM_DIR}/bin/clang)
+	set(CMAKE_CXX_COMPILER ${T113_LLVM_DIR}/bin/clang++)
+	set(CMAKE_C_COMPILER_TARGET arm-linux-musleabihf)
+	set(CMAKE_CXX_COMPILER_TARGET arm-linux-musleabihf)
+	set(CMAKE_AR ${T113_LLVM_DIR}/bin/llvm-ar CACHE FILEPATH "")
+	set(CMAKE_RANLIB ${T113_LLVM_DIR}/bin/llvm-ranlib CACHE FILEPATH "")
+	set(CMAKE_STRIP ${T113_LLVM_DIR}/bin/llvm-strip CACHE FILEPATH "")
+	# quoted: flag strings go into the command line as they are, and these
+	# folders may contain spaces
+	string(APPEND T113_CPU_FLAGS " \"--gcc-install-dir=${T113_GCC_DIR}\"")
+	set(T113_LINK_FLAGS "\"--ld-path=${T113_LLD}\"")
+else()
+	set(CMAKE_C_COMPILER ${T113_TOOL_PREFIX}gcc)
+	set(CMAKE_CXX_COMPILER ${T113_TOOL_PREFIX}g++)
+	set(T113_LINK_FLAGS "")
+endif()
+
 set(CMAKE_C_FLAGS_INIT "${T113_CPU_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${T113_CPU_FLAGS}")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static ${T113_LINK_FLAGS}")
 
 # Libraries and headers come only from the ARM sysroot; programs (Python and
 # the 32blit tools) from the build machine. Packages from both, so

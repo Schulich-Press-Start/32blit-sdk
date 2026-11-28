@@ -11,6 +11,7 @@ These instructions cover building 32blit on macOS.
 - [Building \& Running on 32Blit](#building--running-on-32blit)
 - [Building \& Running Locally](#building--running-locally)
   - [Build Everything](#build-everything)
+- [Building for the T113 (32blit-linux)](#building-for-the-t113-32blit-linux)
 - [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
@@ -39,10 +40,12 @@ brew install libjpeg
 brew install freetype
 ````
 
-Then install 32blit tools itself.
+Then install 32blit tools itself. Homebrew's Python doesn't allow installing packages into it directly, so use a virtual environment and activate it in each terminal you build from:
 
 ```shell
-pip3 install 32blit construct "bitstring<5"
+python3 -m venv ~/.venvs/32blit
+source ~/.venvs/32blit/bin/activate
+pip install 32blit construct "bitstring<5"
 ```
 Note: bitstring 5 removed `ConstBitStream` which 32blit tools requires.
 
@@ -119,11 +122,13 @@ For example:
 make raycaster
 ```
 
-This will produce `examples/raycaster/raycaster` which you should run with:
+This will produce an app, `examples/raycaster/Ray Caster.app`, which you should run with:
 
 ```shell
-./examples/raycaster/raycaster
+open "examples/raycaster/Ray Caster.app"
 ```
+
+Or run `"examples/raycaster/Ray Caster.app/Contents/MacOS/Ray Caster"` to see its output in the terminal.
 
 ### Build Everything
 
@@ -134,6 +139,10 @@ make
 ```
 
 When the build completes you should be able to run any example.
+
+## Building for the T113 (32blit-linux)
+
+Games for the Allwinner T113 cross-build on macOS too, with Homebrew's LLVM: `brew install llvm lld pkgconf`, then follow "Building for the T113" in [32blit-linux/README.md](../32blit-linux/README.md). The port's unit tests also run natively on macOS. Running a 32blit-linux game needs Linux (the T113, or a Linux VM), since the port draws through Linux's display and input devices; on macOS, run the SDL build above instead.
 
 ## Troubleshooting
 
