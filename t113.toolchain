@@ -65,8 +65,10 @@ if(CMAKE_HOST_APPLE)
 	set(CMAKE_AR ${T113_LLVM_DIR}/bin/llvm-ar CACHE FILEPATH "")
 	set(CMAKE_RANLIB ${T113_LLVM_DIR}/bin/llvm-ranlib CACHE FILEPATH "")
 	set(CMAKE_STRIP ${T113_LLVM_DIR}/bin/llvm-strip CACHE FILEPATH "")
-	string(APPEND T113_CPU_FLAGS " --gcc-install-dir=${T113_GCC_DIR}")
-	set(T113_LINK_FLAGS "--ld-path=${T113_LLD}")
+	# quoted: flag strings go into the command line as they are, and these
+	# folders may contain spaces
+	string(APPEND T113_CPU_FLAGS " \"--gcc-install-dir=${T113_GCC_DIR}\"")
+	set(T113_LINK_FLAGS "\"--ld-path=${T113_LLD}\"")
 else()
 	set(CMAKE_C_COMPILER ${T113_TOOL_PREFIX}gcc)
 	set(CMAKE_CXX_COMPILER ${T113_TOOL_PREFIX}g++)
